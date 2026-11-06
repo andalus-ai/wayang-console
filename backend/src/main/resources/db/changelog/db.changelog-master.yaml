@@ -99,3 +99,44 @@ databaseChangeLog:
       rollback:
         - dropTable: { tableName: wc_audit_record }
         - dropColumn: { tableName: wc_enrollment_token, columnName: revoked_at }
+
+  - changeSet:
+      id: 003-audit-chain-runtime-credential-rotation
+      author: andalus-ai
+      changes:
+        - addColumn:
+            tableName: wc_audit_record
+            columns:
+              - column: { name: sequence_no, type: BIGINT, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: hash_version, type: VARCHAR(16), defaultValue: legacy, constraints: { nullable: false } }
+              - column: { name: previous_hash, type: VARCHAR(64), defaultValue: "0000000000000000000000000000000000000000000000000000000000000000", constraints: { nullable: false } }
+              - column: { name: record_hash, type: VARCHAR(64), defaultValue: "0000000000000000000000000000000000000000000000000000000000000000", constraints: { nullable: false } }
+        - createTable:
+            tableName: wc_audit_chain_head
+            columns:
+              - column: { name: organization_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: environment_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: last_sequence, type: BIGINT, constraints: { nullable: false } }
+              - column: { name: last_hash, type: VARCHAR(64), constraints: { nullable: false } }
+        - addPrimaryKey:
+            tableName: wc_audit_chain_head
+            columnNames: organization_id, environment_id
+            constraintName: pk_wc_audit_chain_head
+        - addUniqueConstraint:
+            tableName: wc_audit_record
+            columnNames: organization_id, environment_id, sequence_no
+            constraintName: uk_wc_audit_scope_sequence
+        - addColumn:
+            tableName: wc_runtime_instance
+            columns:
+              - column: { name: credential_version, type: BIGINT, defaultValueNumeric: 1, constraints: { nullable: false } }
+              - column: { name: credential_rotated_at, type: TIMESTAMP WITH TIME ZONE }
+      rollback:
+        - dropColumn: { tableName: wc_runtime_instance, columnName: credential_rotated_at }
+        - dropColumn: { tableName: wc_runtime_instance, columnName: credential_version }
+        - dropUniqueConstraint: { tableName: wc_audit_record, constraintName: uk_wc_audit_scope_sequence }
+        - dropTable: { tableName: wc_audit_chain_head }
+        - dropColumn: { tableName: wc_audit_record, columnName: record_hash }
+        - dropColumn: { tableName: wc_audit_record, columnName: previous_hash }
+        - dropColumn: { tableName: wc_audit_record, columnName: hash_version }
+        - dropColumn: { tableName: wc_audit_record, columnName: sequence_no }
