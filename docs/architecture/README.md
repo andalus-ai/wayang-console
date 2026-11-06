@@ -15,6 +15,8 @@ Start with Registry, Inventory, Environment, and Operations. Deployment orchestr
 ## Security and identity
 Runtime identity is stable across restarts; registration leases are separate. Never trust organization or environment IDs supplied by an unauthenticated runtime payload. The authenticated enrollment credential determines permitted scope. Store only hashes of one-time enrollment tokens. Commands require target authorization, idempotency keys, expiry, acknowledgement, and audit. Never expose generic shell or arbitrary code execution commands.
 
+Operator identity uses a Wayang-owned principal and identity-provider port. The default implementation validates OIDC access tokens with provider discovery/JWKS and issuer/audience checks. Numou is an optional adapter, not a Console dependency. See [ADR-009](ADR-009-identity-provider-boundary.md).
+
 ## Availability
 Runtime is authoritative for in-flight execution. Console outages must not stop local workflow execution. Agents retry registration and heartbeat with backoff and bounded local telemetry buffering. Expired commands are rejected.
 

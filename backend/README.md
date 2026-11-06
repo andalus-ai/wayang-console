@@ -26,7 +26,7 @@ The datasource can be configured with `DB_USERNAME`, `DB_PASSWORD`, and `DB_JDBC
 
 ## Authentication
 
-Runtime endpoints use the opaque runtime registration bearer credential. Operator endpoints under `/api/v1/console/**` require a verified JWT. Configure `mp.jwt.verify.publickey.location` and `mp.jwt.verify.issuer` using deployment environment configuration. The JWT must include `sub`, `organization_id`, `environment_ids`, and `groups` claims as described in [the operator security contract](../docs/security/operator-authentication-and-fleet-api.md).
+Runtime endpoints use the opaque runtime registration bearer credential. Operator endpoints under `/api/v1/console/**` require a JWT validated by Quarkus OIDC. Production configuration uses `WAYANG_CONSOLE_OIDC_AUTH_SERVER_URL`, `WAYANG_CONSOLE_OIDC_ISSUER`, `WAYANG_CONSOLE_OIDC_CLIENT_ID`, and `WAYANG_CONSOLE_OIDC_AUDIENCE`; the OIDC discovery/JWKS endpoint supplies signing keys. Quarkus verifies signature, issuer, audience, and required subject. In development, Quarkus Dev Services can start a local OIDC provider when Docker is available. The token must include `sub`, `organization_id`, `environment_ids`, and Console roles as described in [the operator security contract](../docs/security/operator-authentication-and-fleet-api.md).
 
 Roles:
 

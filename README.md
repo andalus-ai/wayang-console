@@ -27,15 +27,16 @@ It manages independently deployed Wayang runtimes across development, staging, p
 - Quarkus backend foundation and PostgreSQL/Liquibase persistence.
 - One-time runtime enrollment with SHA-256 credential digests and one-time plaintext delivery.
 - Runtime heartbeat leases and bounded capability/workflow inventory reporting.
-- JWT-authenticated operator APIs for scoped fleet listing, runtime detail, enrollment-token issuance/revocation, runtime credential revocation, and audit history.
-- Environment and organization boundaries resolved from verified JWT claims.
+- Scoped fleet APIs for runtime listing/detail, enrollment-token issuance/revocation, runtime credential revocation, and audit history.
+- Operator identity port with an OIDC/JWKS-backed Quarkus adapter; organization and environment scope come from verified access-token claims.
+- Optional Numou integration boundary documented in [ADR-009](docs/architecture/ADR-009-identity-provider-boundary.md); no Numou runtime dependency.
 - Management commands remain disabled; the Console does not remotely stop runtime workloads.
 
-Operator identity and claim requirements are documented in [Operator authentication and fleet API](docs/security/operator-authentication-and-fleet-api.md).
+See [operator authentication and fleet API](docs/security/operator-authentication-and-fleet-api.md) for issuer, audience, claim, and role configuration.
 
 ## Status
 
-Early implementation. The APIs are not yet a production-ready control plane: configure JWT verification, TLS, gateway rate limiting, and database-backed integration tests before production use. Deployment management, digital twin reconciliation, and remote management commands remain later milestones.
+Early implementation. Production use still requires configured OIDC/TLS, gateway rate limiting, and successful database-backed CI. Deployment management, digital twin reconciliation, tamper-evident audit, and remote management commands remain later milestones.
 
 ## Development
 
