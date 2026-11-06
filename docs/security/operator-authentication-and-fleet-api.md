@@ -5,35 +5,44 @@
 Runtime credentials and operator credentials are separate security principals.
 
 - Runtime credentials are high-entropy opaque bearer tokens issued during one-time enrollment. Only SHA-256 digests are stored.
-- Operator access tokens are signed JWTs verified by the Quarkus SmallRye JWT extension.
+- Operator access tokens are verified by Quarkus OIDC using provider discovery and the provider's JWKS endpoint.
 - Operator identity and scope are never accepted from request bodies, query parameters, or headers other than the bearer token.
 
-## JWT contract
+## OIDC token contract
 
-The Console expects the verified JWT to contain:
+The Console expects a verified access token to contain:
 
 | Claim | Type | Meaning |
 |---|---|---|
-| `sub` | string | Stable operator identity, written to audit records |
+| `sub` | string | Stable actor identity, written to audit records |
 | `organization_id` | UUID string | The organization boundary |
 | `environment_ids` | array of UUID strings | Environments the operator may access |
-| `groups` or Keycloak `realm_access/roles` / `resource_access/{client-id}/roles` | array of strings | Permissions mapped to Quarkus roles |
+| `groups`, or Keycloak `realm_access/roles` / `resource_access/{client-id}/roles` | array of strings | Permissions mapped to Quarkus roles |
 
-Quarkus OIDC maps standard `groups` claims and Keycloak realm/client role claims to `SecurityIdentity` roles. Configure the identity provider to issue these exact Console role names; do not grant broad administrator roles by default.
+Quarkus OIDC maps the standard `groups` claim and Keycloak realm/client role claims to `SecurityIdentity` roles. The identity provider must issue the exact Console role names; do not grant broad administrator roles by default.
 
 Supported roles:
 
 - `console:runtime:read`: read runtime fleet, inventory, and audit history
 - `console:runtime:admin`: issue/revoke enrollment credentials and revoke runtime registrations; also grants read access
 
-Configure OIDC bearer-token verification using Quarkus OIDC. The Console uses provider discovery and JWKS to verify signatures, and validates the configured issuer and audience. Configure production values:
+## Production configuration
+
+The production profile validates JWT signatures through OIDC discovery/JWKS, checks the expected issuer and audience, and requires a subject. Configure:
 
 ```properties
-mp.jwt.verify.publickey.location=${WAYANG_CONSOLE_JWT_PUBLIC_KEY_LOCATION}
-mp.jwt.verify.issuer=${WAYANG_CONSOLE_JWT_ISSUER}
+%prod.quarkus.oidc.application-type=service
+%prod.quarkus.oidc.auth-server-url=\${WAYANG_CONSOLE_OIDC_AUTH_SERVER_URL}
+%prod.quarkus.oidc.client-id=\${WAYANG_CONSOLE_OIDC_CLIENT_ID:wayang-console}
+%prod.quarkus.oidc.token.issuer=\${WAYANG_CONSOLE_OIDC_ISSUER}
+%prod.quarkus.oidc.token.audience=\${WAYANG_CONSOLE_OIDC_AUDIENCE:wayang-console}
+quarkus.oidc.roles.source=accesstoken
+quarkus.oidc.token.subject-required=true
 ```
 
-Supply the public key and issuer through deployment configuration or a mounted secret. Do not commit private keys or production issuer values. In production, terminate TLS at a trusted ingress or enable HTTPS at the application boundary. Restrict CORS and apply gateway-level rate limits to enrollment and operator endpoints.
+The values are supplied through deployment configuration. Use the issuer/realm base URL; Quarkus discovers the OIDC metadata and JWKS URL. Do not configure a static development key in production. Never commit private keys, client secrets, or production issuer values.
+
+In development, Quarkus Dev Services can provide a local OIDC provider when Docker is available. Tests disable the OIDC Dev Service unless a test explicitly configures an issuer. Production traffic must use TLS at a trusted ingress or at the application boundary. Restrict CORS and apply gateway-level rate limits to enrollment and operator endpoints.
 
 ## Operator API
 
@@ -48,11 +57,11 @@ All routes below require a verified JWT and a scoped role.
 | POST | `/api/v1/console/runtimes/{runtimeId}/revoke` | runtime admin | Revoke a runtime credential |
 | GET | `/api/v1/console/audit` | runtime read | Scoped audit history; supports page and size |
 
-The issuance response includes the enrollment token ID (used for revocation) and the plaintext token. The enrollment token plaintext is returned only in that issuance response. Persist it only in a secret manager or deliver it through a secure provisioning channel. The database stores only its digest.
+The issuance response includes the enrollment token ID (used for revocation) and plaintext token. Plaintext is returned only in that issuance response. Deliver it through a secure provisioning channel; the database stores only its digest.
 
 ## Scope and information disclosure
 
-Runtime and audit queries are constrained by both the JWT organization and its environment allow-list. A runtime outside the operator's scope is reported as not found rather than disclosing its existence. Environment IDs in request bodies are accepted only when present in the verified JWT's `environment_ids` claim.
+Runtime and audit queries are constrained by both the verified JWT organization and its environment allow-list. A runtime outside the operator's scope is reported as not found rather than disclosing its existence. Environment IDs in request bodies are accepted only when present in the verified JWT's `environment_ids` claim.
 
 ## Audit model
 
@@ -68,12 +77,12 @@ Database-level immutability, retention policies, export, and tamper-evident chai
 
 ## Operational notes and remaining hardening
 
-- The OIDC authorization server URL, expected issuer, client ID, and audience must be configured before enabling operator traffic.
+- Configure the OIDC authorization server URL, expected issuer, client ID, and audience before enabling operator traffic.
 - Configure issuer-side claim mapping so the token contains the exact claims above.
 - Add rate limits and abuse detection at Iket or the ingress gateway.
-- OIDC discovery/JWKS validation and issuer/audience checks are handled by Quarkus OIDC; validate key rotation behavior with the chosen provider and test it during deployment.
+- Validate signing-key rotation behavior with the selected OIDC provider, including old-token overlap and JWKS cache refresh.
 - Add PostgreSQL integration tests for scope isolation, pagination, token revocation, and concurrent redemption.
 - Add audit retention/export and tamper-evidence.
 - Add operator UI only after the API contract is accepted.
 
-The Console remains a management plane. Revoking a registration credential blocks future authenticated management traffic from that runtime; it does not remotely stop workloads already executing on the runtime.
+The Console remains a management plane. Revoking a registration credential blocks future authenticated management traffic from that runtime; it does not terminate workflows already executing on the runtime.
