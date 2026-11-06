@@ -19,6 +19,26 @@ public class RuntimeRegistryService {
     private static final Duration LEASE_TTL = Duration.ofMinutes(2);
     private static final int HEARTBEAT_SECONDS = 30;
 
+    public record IssuedEnrollmentToken(String token, Instant expiresAt) {}
+
+    @Transactional
+    public IssuedEnrollmentToken issueEnrollmentToken(UUID organizationId, UUID environmentId, Duration ttl) {
+        if (organizationId == null || environmentId == null) throw new IllegalArgumentException("Organization and environment are required");
+        if (ttl == null || ttl.isNegative() || ttl.isZero() || ttl.compareTo(Duration.ofDays(7)) > 0)
+            throw new IllegalArgumentException("Enrollment token TTL must be between zero and seven days");
+        String raw = randomToken();
+        Instant now = Instant.now();
+        EnrollmentTokenEntity entity = new EnrollmentTokenEntity();
+        entity.id = UUID.randomUUID();
+        entity.tokenHash = digest(raw);
+        entity.organizationId = organizationId;
+        entity.environmentId = environmentId;
+        entity.createdAt = now;
+        entity.expiresAt = now.plus(ttl);
+        entity.persist();
+        return new IssuedEnrollmentToken(raw, entity.expiresAt);
+    }
+
     public record EnrollmentResult(String registrationId, String registrationToken, Instant registrationExpiresAt,
                                    Instant leaseExpiresAt, int heartbeatIntervalSeconds) {}
     public record HeartbeatResult(Instant leaseExpiresAt, int heartbeatIntervalSeconds) {}
