@@ -18,7 +18,7 @@ public class OperatorFleetResource {
     @Inject OperatorFleetService fleet;
 
     public record IssueTokenRequest(UUID environmentId, Long ttlSeconds) {}
-    public record IssueTokenResponse(String token, java.time.Instant expiresAt) {}
+    public record IssueTokenResponse(UUID tokenId, String token, java.time.Instant expiresAt) {}
 
     @POST
     @Path("/environments/enrollment-tokens")
@@ -28,7 +28,7 @@ public class OperatorFleetResource {
         long seconds = request.ttlSeconds() == null ? 3600 : request.ttlSeconds();
         var result = fleet.issueToken(operator.organizationId(), request.environmentId(),
                 operator.environmentIds(), Duration.ofSeconds(seconds), operator.subject());
-        return new IssueTokenResponse(result.token(), result.expiresAt());
+        return new IssueTokenResponse(result.tokenId(), result.token(), result.expiresAt());
     }
 
     @DELETE
