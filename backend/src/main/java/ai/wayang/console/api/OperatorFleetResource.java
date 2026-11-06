@@ -19,7 +19,6 @@ public class OperatorFleetResource {
 
     public record IssueTokenRequest(UUID environmentId, Long ttlSeconds) {}
     public record IssueTokenResponse(String token, java.time.Instant expiresAt) {}
-    public record ErrorResponse(String code, String message) {}
 
     @POST
     @Path("/environments/enrollment-tokens")
@@ -28,7 +27,7 @@ public class OperatorFleetResource {
         if (request == null) throw new BadRequestException("Request body is required");
         long seconds = request.ttlSeconds() == null ? 3600 : request.ttlSeconds();
         var result = fleet.issueToken(operator.organizationId(), request.environmentId(),
-                operator.environmentIds(), Duration.ofSeconds(seconds));
+                operator.environmentIds(), Duration.ofSeconds(seconds), operator.subject());
         return new IssueTokenResponse(result.token(), result.expiresAt());
     }
 
@@ -36,7 +35,7 @@ public class OperatorFleetResource {
     @Path("/enrollment-tokens/{tokenId}")
     public void revokeToken(@PathParam("tokenId") UUID tokenId) {
         operator.requireAdmin();
-        fleet.revokeEnrollmentToken(operator.organizationId(), tokenId, operator.environmentIds(), subject());
+        fleet.revokeEnrollmentToken(operator.organizationId(), tokenId, operator.environmentIds(), operator.subject());
     }
 
     @GET
@@ -58,15 +57,6 @@ public class OperatorFleetResource {
     @Path("/runtimes/{runtimeId}/revoke")
     public void revokeRuntime(@PathParam("runtimeId") UUID runtimeId) {
         operator.requireAdmin();
-        fleet.revokeRuntime(operator.organizationId(), operator.environmentIds(), runtimeId, subject());
-    }
-
-    private String subject() {
-        return operatorSubject();
-    }
-
-    private String operatorSubject() {
-        // Subject is obtained from the authenticated JWT, never from request data.
-        return operator.subject();
+        fleet.revokeRuntime(operator.organizationId(), operator.environmentIds(), runtimeId, operator.subject());
     }
 }
