@@ -4,7 +4,7 @@ import ai.wayang.console.adapter.persistence.*;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
-import jakarta.ws.rs.ConflictException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.NotFoundException;
 import java.time.Instant;
 import java.time.Duration;
@@ -41,7 +41,7 @@ public class OperatorFleetService {
         EnrollmentTokenEntity token = EnrollmentTokenEntity.findById(tokenId);
         if (token == null || !token.organizationId.equals(organizationId) || !environments.contains(token.environmentId))
             throw new NotFoundException("Enrollment token not found");
-        if (token.consumedAt != null) throw new ConflictException("Enrollment token has already been consumed");
+        if (token.consumedAt != null) throw new WebApplicationException("Enrollment token has already been consumed", 409);
         if (token.revokedAt == null) {
             token.revokedAt = Instant.now();
             auditIntegrity.append(organizationId, token.environmentId, actor, "ENROLLMENT_TOKEN_REVOKED", "ENROLLMENT_TOKEN", token.id.toString(), Instant.now(), "SUCCESS");
