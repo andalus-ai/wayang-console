@@ -1,6 +1,7 @@
 package ai.wayang.console.application;
 
 import ai.wayang.console.adapter.persistence.EnrollmentTokenEntity;
+import ai.wayang.console.adapter.persistence.AuditRecordEntity;
 import ai.wayang.console.adapter.persistence.RuntimeCapabilityEntity;
 import ai.wayang.console.testsupport.PostgresTestResource;
 import io.quarkus.test.common.QuarkusTestResource;
@@ -111,4 +112,41 @@ class RuntimeRegistryIntegrationTest {
         assertEquals(2, first.items().size());
         assertEquals(1, second.items().size());
     }
+
+    @Test
+    @TestTransaction
+    void runtimeCredentialRotationInvalidatesOldTokenAndReturnsNewTokenOnce() {
+        UUID organizationId = UUID.randomUUID();
+        UUID environmentId = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(organizationId, environmentId, Duration.ofHours(1));
+        var runtime = registry.enroll(enrollment.token(), "rotation-runtime", "1.0.0", null, null, null);
+        UUID runtimeId = UUID.fromString(runtime.registrationId());
+
+        var rotated = fleet.rotateCredential(organizationId, Set.of(environmentId), runtimeId, "operator-test");
+        assertNotEquals(runtime.registrationToken(), rotated.token());
+        assertThrows(SecurityException.class, () -> registry.authenticate(runtime.registrationToken()));
+        assertEquals(runtimeId, registry.authenticate(rotated.token()).id());
+        assertEquals(2, rotated.credentialVersion());
+    }
+
+    @Test
+    @TestTransaction
+    void auditChainVerifiesAndDetectsRecordMutation() {
+        UUID organizationId = UUID.randomUUID();
+        UUID environmentId = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(organizationId, environmentId, Duration.ofHours(1));
+        registry.enroll(enrollment.token(), "audit-runtime", "1.0.0", null, null, null);
+
+        var verified = fleet.verifyAudit(organizationId, Set.of(environmentId), environmentId);
+        assertTrue(verified.valid());
+        assertTrue(verified.verifiedRecords() >= 1);
+
+        AuditRecordEntity record = AuditRecordEntity.find("organizationId = ?1 and environmentId = ?2",
+                organizationId, environmentId).firstResult();
+        record.resourceId = "tampered-resource";
+        var tampered = fleet.verifyAudit(organizationId, Set.of(environmentId), environmentId);
+        assertFalse(tampered.valid());
+        assertNotNull(tampered.firstInvalidSequence());
+    }
+
 }
