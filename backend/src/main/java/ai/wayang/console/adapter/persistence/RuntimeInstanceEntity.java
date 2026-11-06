@@ -22,6 +22,8 @@ public class RuntimeInstanceEntity extends PanacheEntityBase {
     @Column(name = "health_status", nullable = false, length = 24) public String healthStatus;
     @Column(name = "registration_token_hash", nullable = false, unique = true, length = 64) public String registrationTokenHash;
     @Column(name = "registration_expires_at", nullable = false) public Instant registrationExpiresAt;
+    @Column(name = "credential_version", nullable = false) public long credentialVersion;
+    @Column(name = "credential_rotated_at") public Instant credentialRotatedAt;
     @Column(name = "registered_at", nullable = false) public Instant registeredAt;
     @Column(name = "last_seen_at") public Instant lastSeenAt;
     @Column(name = "lease_expires_at") public Instant leaseExpiresAt;
