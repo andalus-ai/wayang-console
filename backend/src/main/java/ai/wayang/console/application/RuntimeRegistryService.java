@@ -70,6 +70,7 @@ public class RuntimeRegistryService {
         runtime.status = "ONLINE";
         runtime.healthStatus = "UNKNOWN";
         runtime.registrationTokenHash = digest(rawRegistrationToken);
+        runtime.credentialVersion = 1;
         runtime.registrationExpiresAt = now.plus(REGISTRATION_TTL);
         runtime.registeredAt = now;
         runtime.lastSeenAt = now;
