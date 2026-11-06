@@ -17,14 +17,16 @@ The Console expects the verified JWT to contain:
 | `sub` | string | Stable operator identity, written to audit records |
 | `organization_id` | UUID string | The organization boundary |
 | `environment_ids` | array of UUID strings | Environments the operator may access |
-| `groups` | array of strings | Permissions mapped to Quarkus roles |
+| `groups` or Keycloak `realm_access/roles` / `resource_access/{client-id}/roles` | array of strings | Permissions mapped to Quarkus roles |
+
+Quarkus OIDC maps standard `groups` claims and Keycloak realm/client role claims to `SecurityIdentity` roles. Configure the identity provider to issue these exact Console role names; do not grant broad administrator roles by default.
 
 Supported roles:
 
 - `console:runtime:read`: read runtime fleet, inventory, and audit history
 - `console:runtime:admin`: issue/revoke enrollment credentials and revoke runtime registrations; also grants read access
 
-Configure JWT verification using the standard SmallRye JWT properties, for example:
+Configure OIDC bearer-token verification using Quarkus OIDC. The Console uses provider discovery and JWKS to verify signatures, and validates the configured issuer and audience. Configure production values:
 
 ```properties
 mp.jwt.verify.publickey.location=${WAYANG_CONSOLE_JWT_PUBLIC_KEY_LOCATION}
@@ -66,10 +68,10 @@ Database-level immutability, retention policies, export, and tamper-evident chai
 
 ## Operational notes and remaining hardening
 
-- The JWT verification key and issuer must be configured before enabling operator traffic.
+- The OIDC authorization server URL, expected issuer, client ID, and audience must be configured before enabling operator traffic.
 - Configure issuer-side claim mapping so the token contains the exact claims above.
 - Add rate limits and abuse detection at Iket or the ingress gateway.
-- Add key rotation/JWKS-backed OIDC integration and explicit audience validation.
+- OIDC discovery/JWKS validation and issuer/audience checks are handled by Quarkus OIDC; validate key rotation behavior with the chosen provider and test it during deployment.
 - Add PostgreSQL integration tests for scope isolation, pagination, token revocation, and concurrent redemption.
 - Add audit retention/export and tamper-evidence.
 - Add operator UI only after the API contract is accepted.
