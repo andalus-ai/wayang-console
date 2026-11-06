@@ -50,10 +50,9 @@ public class RuntimeRegistryService {
                                    String deploymentId, String hostname, String platform) {
         var token = EnrollmentTokenEntity.find("tokenHash", digest(enrollmentToken)).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
         if (!(token instanceof EnrollmentTokenEntity enrollment)
-                || enrollment.consumedAt != null || !enrollment.expiresAt.isAfter(Instant.now())) {
+                || enrollment.revokedAt != null || enrollment.consumedAt != null || !enrollment.expiresAt.isAfter(Instant.now())) {
             throw new IllegalArgumentException("Enrollment credential is invalid or expired");
         }
-
         Instant now = Instant.now();
         enrollment.consumedAt = now;
         String rawRegistrationToken = randomToken();
@@ -98,6 +97,7 @@ public class RuntimeRegistryService {
     private RuntimeInstanceEntity authenticateEntity(String rawToken) {
         var found = RuntimeInstanceEntity.find("registrationTokenHash", digest(rawToken)).firstResult();
         if (!(found instanceof RuntimeInstanceEntity runtime)
+                || "REVOKED".equals(runtime.status)
                 || !runtime.registrationExpiresAt.isAfter(Instant.now())) {
             throw new SecurityException("Runtime credential is invalid or expired");
         }
