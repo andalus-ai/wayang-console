@@ -60,7 +60,7 @@ public class AuditIntegrityService {
                 .getResultStream().findFirst().orElse(new Object[]{0L, GENESIS});
         List<AuditRecordEntity> records = AuditRecordEntity.list(
                 "organizationId = ?1 and environmentId = ?2 and hashVersion = ?3 order by sequenceNo", organizationId, environmentId, HASH_VERSION);
-        long sequence = records.isEmpty() ? ((Number) head[0]).longValue() + 1 : records.get(0).sequenceNo; String previous = GENESIS;
+        long sequence = 1; String previous = GENESIS;
         for (AuditRecordEntity r : records) {
             if (r.sequenceNo != sequence || !previous.equals(r.previousHash)
                     || !HASH_VERSION.equals(r.hashVersion) || !hash(r).equals(r.recordHash)) {
@@ -69,7 +69,8 @@ public class AuditIntegrityService {
             }
             previous = r.recordHash; sequence++;
         }
-        boolean valid = (records.isEmpty() ? GENESIS.equals(head[1]) : ((Number) head[0]).longValue() == records.get(records.size() - 1).sequenceNo) && previous.equals(records.isEmpty() ? GENESIS : head[1]);
+        boolean valid = ((Number) head[0]).longValue() == (records.isEmpty() ? 0L : records.get(records.size() - 1).sequenceNo)
+                && previous.equals(head[1]);
         return new VerificationResult(organizationId, environmentId, records.size(), valid,
                 valid ? null : sequence, (String) head[1], previous);
     }
