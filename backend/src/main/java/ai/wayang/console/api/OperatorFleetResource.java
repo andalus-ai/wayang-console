@@ -59,4 +59,12 @@ public class OperatorFleetResource {
         operator.requireAdmin();
         fleet.revokeRuntime(operator.organizationId(), operator.environmentIds(), runtimeId, operator.subject());
     }
+
+    @GET
+    @Path("/audit")
+    public OperatorFleetService.AuditPage audit(@DefaultValue("0") @QueryParam("page") int page,
+            @DefaultValue("25") @QueryParam("size") int size) {
+        operator.requireRead();
+        return fleet.listAudit(operator.organizationId(), operator.environmentIds(), page, size);
+    }
 }
