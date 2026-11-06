@@ -46,7 +46,7 @@ All routes below require a verified JWT and a scoped role.
 | POST | `/api/v1/console/runtimes/{runtimeId}/revoke` | runtime admin | Revoke a runtime credential |
 | GET | `/api/v1/console/audit` | runtime read | Scoped audit history; supports page and size |
 
-The enrollment token plaintext is returned only in the issuance response. Persist it only in a secret manager or deliver it through a secure provisioning channel. The database stores only its digest.
+The issuance response includes the enrollment token ID (used for revocation) and the plaintext token. The enrollment token plaintext is returned only in that issuance response. Persist it only in a secret manager or deliver it through a secure provisioning channel. The database stores only its digest.
 
 ## Scope and information disclosure
 
