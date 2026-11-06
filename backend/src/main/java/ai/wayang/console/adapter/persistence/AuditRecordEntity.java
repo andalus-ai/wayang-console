@@ -7,7 +7,7 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "wc_audit_record", indexes = {
-    @Index(name = "idx_wc_audit_scope_time", columnList = "organization_id, environment_id, occurred_at"),
+    @Index(name = "idx_wc_audit_scope_time", columnList = "organization_id, occurred_at"),
     @Index(name = "idx_wc_audit_resource", columnList = "resource_type, resource_id")
 }, uniqueConstraints = @UniqueConstraint(name = "uk_wc_audit_scope_sequence",
         columnNames = {"organization_id", "environment_id", "sequence_no"}))
