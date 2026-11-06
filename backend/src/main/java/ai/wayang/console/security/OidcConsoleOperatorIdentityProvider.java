@@ -30,34 +30,35 @@ public class OidcConsoleOperatorIdentityProvider implements ConsoleOperatorIdent
                 || jwt.getSubject() == null || jwt.getSubject().isBlank()) {
             throw new NotAuthorizedException("Bearer access token required");
         }
-
-        UUID organizationId = uuidClaim("organization_id");
-        Set<UUID> environments = environmentClaim();
-        Set<String> roles = identity.getRoles();
-        return new ConsoleOperatorPrincipal(jwt.getSubject(), organizationId, environments, roles);
+        return fromVerifiedClaims(jwt.getSubject(), jwt.getClaim("organization_id"),
+                jwt.getClaim("environment_ids"), identity.getRoles());
     }
 
-    private UUID uuidClaim(String name) {
-        Object value = jwt.getClaim(name);
-        if (value == null) {
-            throw new ForbiddenException("Operator token is missing required " + name + " scope");
+    static ConsoleOperatorPrincipal fromVerifiedClaims(String subject, Object organizationClaim,
+                                                        Object environmentClaim, Set<String> roles) {
+        if (subject == null || subject.isBlank()) {
+            throw new NotAuthorizedException("Bearer access token required");
+        }
+        UUID organizationId;
+        if (organizationClaim == null) {
+            throw new ForbiddenException("Operator token is missing required organization_id scope");
         }
         try {
-            return UUID.fromString(value.toString());
+            organizationId = UUID.fromString(organizationClaim.toString());
         } catch (IllegalArgumentException invalid) {
-            throw new ForbiddenException("Operator token contains invalid " + name + " scope");
+            throw new ForbiddenException("Operator token contains invalid organization_id scope");
         }
-    }
 
-    private Set<UUID> environmentClaim() {
-        Object value = jwt.getClaim("environment_ids");
-        if (!(value instanceof Collection<?> values) || values.isEmpty()) {
+        if (!(environmentClaim instanceof Collection<?> values) || values.isEmpty()) {
             throw new ForbiddenException("Operator token is missing required environment_ids scope");
         }
+        final Set<UUID> environments;
         try {
-            return values.stream().map(Object::toString).map(UUID::fromString).collect(Collectors.toUnmodifiableSet());
+            environments = values.stream().map(Object::toString).map(UUID::fromString)
+                    .collect(Collectors.toUnmodifiableSet());
         } catch (RuntimeException invalid) {
             throw new ForbiddenException("Operator token contains invalid environment_ids scope");
         }
+        return new ConsoleOperatorPrincipal(subject, organizationId, environments, roles);
     }
 }
