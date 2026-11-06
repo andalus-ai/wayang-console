@@ -12,6 +12,7 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.UUID;
 import jakarta.persistence.LockModeType;
+import jakarta.inject.Inject;
 
 @ApplicationScoped
 public class RuntimeRegistryService {
@@ -19,6 +20,7 @@ public class RuntimeRegistryService {
     private static final Duration REGISTRATION_TTL = Duration.ofDays(30);
     private static final Duration LEASE_TTL = Duration.ofMinutes(2);
     private static final int HEARTBEAT_SECONDS = 30;
+    @Inject AuditIntegrityService auditIntegrity;
 
     public record IssuedEnrollmentToken(UUID tokenId, String token, Instant expiresAt) {}
 
@@ -74,17 +76,8 @@ public class RuntimeRegistryService {
         runtime.leaseExpiresAt = now.plus(LEASE_TTL);
         runtime.persist();
 
-        AuditRecordEntity audit = new AuditRecordEntity();
-        audit.id = UUID.randomUUID();
-        audit.organizationId = enrollment.organizationId;
-        audit.environmentId = enrollment.environmentId;
-        audit.actorSubject = "runtime:" + runtime.instanceId;
-        audit.action = "RUNTIME_ENROLLED";
-        audit.resourceType = "RUNTIME";
-        audit.resourceId = runtime.id.toString();
-        audit.occurredAt = now;
-        audit.outcome = "SUCCESS";
-        audit.persist();
+        auditIntegrity.append(enrollment.organizationId, enrollment.environmentId,
+                "runtime:" + runtime.instanceId, "RUNTIME_ENROLLED", "RUNTIME", runtime.id.toString(), now, "SUCCESS");
 
         return new EnrollmentResult(runtime.id.toString(), rawRegistrationToken, runtime.registrationExpiresAt,
                 runtime.leaseExpiresAt, HEARTBEAT_SECONDS);
@@ -101,6 +94,26 @@ public class RuntimeRegistryService {
         return new HeartbeatResult(runtime.leaseExpiresAt, HEARTBEAT_SECONDS);
     }
 
+    public record CredentialRotation(String runtimeId, String token, Instant expiresAt, long credentialVersion) {}
+
+    @Transactional
+    public CredentialRotation rotateCredential(UUID runtimeId) {
+        RuntimeInstanceEntity found = RuntimeInstanceEntity.findById(runtimeId, LockModeType.PESSIMISTIC_WRITE);
+        if (found == null || "REVOKED".equals(found.status)
+                || !found.registrationExpiresAt.isAfter(Instant.now())) {
+            throw new SecurityException("Runtime is not eligible for credential rotation");
+        }
+        Instant now = Instant.now();
+        String raw = randomToken();
+        found.registrationTokenHash = digest(raw);
+        found.registrationExpiresAt = now.plus(REGISTRATION_TTL);
+        found.credentialVersion = Math.max(1, found.credentialVersion) + 1;
+        found.credentialRotatedAt = now;
+        auditIntegrity.append(found.organizationId, found.environmentId,
+                "console:system", "RUNTIME_CREDENTIAL_ROTATED", "RUNTIME", found.id.toString(), now, "SUCCESS");
+        return new CredentialRotation(found.id.toString(), raw, found.registrationExpiresAt, found.credentialVersion);
+    }
+
     @Transactional
     public AuthenticatedRuntime authenticate(String bearerToken) {
         RuntimeInstanceEntity runtime = authenticateEntity(bearerToken);
@@ -108,7 +121,8 @@ public class RuntimeRegistryService {
     }
 
     private RuntimeInstanceEntity authenticateEntity(String rawToken) {
-        var found = RuntimeInstanceEntity.find("registrationTokenHash", digest(rawToken)).firstResult();
+        var found = RuntimeInstanceEntity.find("registrationTokenHash", digest(rawToken))
+                .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
         if (!(found instanceof RuntimeInstanceEntity runtime)
                 || "REVOKED".equals(runtime.status)
                 || !runtime.registrationExpiresAt.isAfter(Instant.now())) {
