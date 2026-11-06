@@ -8,6 +8,7 @@ import jakarta.transaction.Transactional;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
@@ -39,7 +40,7 @@ public class AuditIntegrityService {
         r.id = UUID.randomUUID(); r.organizationId = organizationId; r.environmentId = environmentId;
         r.actorSubject = required(actor, "actor"); r.action = required(action, "action");
         r.resourceType = required(resourceType, "resourceType"); r.resourceId = required(resourceId, "resourceId");
-        r.occurredAt = occurredAt == null ? Instant.now() : occurredAt;
+        r.occurredAt = (occurredAt == null ? Instant.now() : occurredAt).truncatedTo(ChronoUnit.MICROS);
         r.outcome = required(outcome, "outcome"); r.sequenceNo = sequence;
         r.hashVersion = HASH_VERSION; r.previousHash = (String) head[1]; r.recordHash = hash(r);
         r.persist();
