@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.UUID;
+import jakarta.persistence.LockModeType;
 
 @ApplicationScoped
 public class RuntimeRegistryService {
@@ -47,7 +48,7 @@ public class RuntimeRegistryService {
     @Transactional
     public EnrollmentResult enroll(String enrollmentToken, String instanceId, String runtimeVersion,
                                    String deploymentId, String hostname, String platform) {
-        var token = EnrollmentTokenEntity.find("tokenHash", digest(enrollmentToken)).firstResult();
+        var token = EnrollmentTokenEntity.find("tokenHash", digest(enrollmentToken)).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
         if (!(token instanceof EnrollmentTokenEntity enrollment)
                 || enrollment.consumedAt != null || !enrollment.expiresAt.isAfter(Instant.now())) {
             throw new IllegalArgumentException("Enrollment credential is invalid or expired");
