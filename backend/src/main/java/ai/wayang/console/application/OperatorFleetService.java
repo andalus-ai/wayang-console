@@ -25,14 +25,14 @@ public class OperatorFleetService {
     public record PageResult(List<RuntimeSummary> items, long total, int page, int size) {}
     public record AuditView(Instant occurredAt, String actorSubject, String action, String resourceType, String resourceId, String outcome) {}
     public record AuditPage(List<AuditView> items, long total, int page, int size) {}
-    public record TokenResult(String token, Instant expiresAt) {}
+    public record TokenResult(UUID tokenId, String token, Instant expiresAt) {}
 
     @Transactional
     public TokenResult issueToken(UUID organizationId, UUID environmentId, Set<UUID> allowedEnvironments, Duration ttl, String actor) {
         requireEnvironmentScope(environmentId, allowedEnvironments);
         var issued = registry.issueEnrollmentToken(organizationId, environmentId, ttl);
-        audit(organizationId, environmentId, actor, "ENROLLMENT_TOKEN_ISSUED", "ENROLLMENT_TOKEN", "issued");
-        return new TokenResult(issued.token(), issued.expiresAt());
+        audit(organizationId, environmentId, actor, "ENROLLMENT_TOKEN_ISSUED", "ENROLLMENT_TOKEN", issued.tokenId().toString());
+        return new TokenResult(issued.tokenId(), issued.token(), issued.expiresAt());
     }
 
     @Transactional
