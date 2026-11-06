@@ -24,6 +24,8 @@ public class RuntimeInventoryService {
 
         List<CapabilityInput> safeCapabilities = capabilities == null ? List.of() : List.copyOf(capabilities);
         List<WorkflowInput> safeWorkflows = workflows == null ? List.of() : List.copyOf(workflows);
+        if (safeCapabilities.size() > 1000 || safeWorkflows.size() > 1000)
+            throw new IllegalArgumentException("Inventory report exceeds the 1000-item limit per collection");
         for (CapabilityInput input : safeCapabilities) {
             require(input != null && text(input.componentId()) && text(input.version()) && text(input.capability()),
                     "Each capability requires componentId, version, and capability");
