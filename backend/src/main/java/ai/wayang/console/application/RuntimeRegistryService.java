@@ -73,6 +73,19 @@ public class RuntimeRegistryService {
         runtime.lastSeenAt = now;
         runtime.leaseExpiresAt = now.plus(LEASE_TTL);
         runtime.persist();
+
+        AuditRecordEntity audit = new AuditRecordEntity();
+        audit.id = UUID.randomUUID();
+        audit.organizationId = enrollment.organizationId;
+        audit.environmentId = enrollment.environmentId;
+        audit.actorSubject = "runtime:" + runtime.instanceId;
+        audit.action = "RUNTIME_ENROLLED";
+        audit.resourceType = "RUNTIME";
+        audit.resourceId = runtime.id.toString();
+        audit.occurredAt = now;
+        audit.outcome = "SUCCESS";
+        audit.persist();
+
         return new EnrollmentResult(runtime.id.toString(), rawRegistrationToken, runtime.registrationExpiresAt,
                 runtime.leaseExpiresAt, HEARTBEAT_SECONDS);
     }
