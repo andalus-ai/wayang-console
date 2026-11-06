@@ -8,6 +8,7 @@ import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.TestTransaction;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
+import jakarta.persistence.EntityManager;
 import jakarta.ws.rs.NotFoundException;
 import org.junit.jupiter.api.Test;
 
@@ -23,6 +24,7 @@ class RuntimeRegistryIntegrationTest {
     @Inject RuntimeRegistryService registry;
     @Inject OperatorFleetService fleet;
     @Inject RuntimeInventoryService inventory;
+    @Inject EntityManager entityManager;
 
     @Test
     @TestTransaction
@@ -144,6 +146,7 @@ class RuntimeRegistryIntegrationTest {
         AuditRecordEntity record = AuditRecordEntity.find("organizationId = ?1 and environmentId = ?2",
                 organizationId, environmentId).firstResult();
         record.resourceId = "tampered-resource";
+        entityManager.flush();
         var tampered = fleet.verifyAudit(organizationId, Set.of(environmentId), environmentId);
         assertFalse(tampered.valid());
         assertNotNull(tampered.firstInvalidSequence());
