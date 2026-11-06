@@ -20,7 +20,7 @@ public class RuntimeRegistryService {
     private static final Duration LEASE_TTL = Duration.ofMinutes(2);
     private static final int HEARTBEAT_SECONDS = 30;
 
-    public record IssuedEnrollmentToken(String token, Instant expiresAt) {}
+    public record IssuedEnrollmentToken(UUID tokenId, String token, Instant expiresAt) {}
 
     @Transactional
     public IssuedEnrollmentToken issueEnrollmentToken(UUID organizationId, UUID environmentId, Duration ttl) {
@@ -37,7 +37,7 @@ public class RuntimeRegistryService {
         entity.createdAt = now;
         entity.expiresAt = now.plus(ttl);
         entity.persist();
-        return new IssuedEnrollmentToken(raw, entity.expiresAt);
+        return new IssuedEnrollmentToken(entity.id, raw, entity.expiresAt);
     }
 
     public record EnrollmentResult(String registrationId, String registrationToken, Instant registrationExpiresAt,
@@ -50,10 +50,9 @@ public class RuntimeRegistryService {
                                    String deploymentId, String hostname, String platform) {
         var token = EnrollmentTokenEntity.find("tokenHash", digest(enrollmentToken)).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
         if (!(token instanceof EnrollmentTokenEntity enrollment)
-                || enrollment.consumedAt != null || !enrollment.expiresAt.isAfter(Instant.now())) {
+                || enrollment.revokedAt != null || enrollment.consumedAt != null || !enrollment.expiresAt.isAfter(Instant.now())) {
             throw new IllegalArgumentException("Enrollment credential is invalid or expired");
         }
-
         Instant now = Instant.now();
         enrollment.consumedAt = now;
         String rawRegistrationToken = randomToken();
@@ -74,6 +73,19 @@ public class RuntimeRegistryService {
         runtime.lastSeenAt = now;
         runtime.leaseExpiresAt = now.plus(LEASE_TTL);
         runtime.persist();
+
+        AuditRecordEntity audit = new AuditRecordEntity();
+        audit.id = UUID.randomUUID();
+        audit.organizationId = enrollment.organizationId;
+        audit.environmentId = enrollment.environmentId;
+        audit.actorSubject = "runtime:" + runtime.instanceId;
+        audit.action = "RUNTIME_ENROLLED";
+        audit.resourceType = "RUNTIME";
+        audit.resourceId = runtime.id.toString();
+        audit.occurredAt = now;
+        audit.outcome = "SUCCESS";
+        audit.persist();
+
         return new EnrollmentResult(runtime.id.toString(), rawRegistrationToken, runtime.registrationExpiresAt,
                 runtime.leaseExpiresAt, HEARTBEAT_SECONDS);
     }
@@ -98,6 +110,7 @@ public class RuntimeRegistryService {
     private RuntimeInstanceEntity authenticateEntity(String rawToken) {
         var found = RuntimeInstanceEntity.find("registrationTokenHash", digest(rawToken)).firstResult();
         if (!(found instanceof RuntimeInstanceEntity runtime)
+                || "REVOKED".equals(runtime.status)
                 || !runtime.registrationExpiresAt.isAfter(Instant.now())) {
             throw new SecurityException("Runtime credential is invalid or expired");
         }
