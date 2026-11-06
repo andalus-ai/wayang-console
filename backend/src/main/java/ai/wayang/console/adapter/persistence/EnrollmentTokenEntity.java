@@ -14,5 +14,6 @@ public class EnrollmentTokenEntity extends PanacheEntityBase {
     @Column(name = "environment_id", nullable = false) public UUID environmentId;
     @Column(name = "expires_at", nullable = false) public Instant expiresAt;
     @Column(name = "consumed_at") public Instant consumedAt;
+    @Column(name = "revoked_at") public Instant revokedAt;
     @Column(name = "created_at", nullable = false) public Instant createdAt;
 }
