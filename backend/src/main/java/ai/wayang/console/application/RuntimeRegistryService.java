@@ -97,7 +97,7 @@ public class RuntimeRegistryService {
     public record CredentialRotation(String runtimeId, String token, Instant expiresAt, long credentialVersion) {}
 
     @Transactional
-    public CredentialRotation rotateCredential(UUID runtimeId) {
+    public CredentialRotation rotateCredential(UUID runtimeId, String actor) {
         RuntimeInstanceEntity found = RuntimeInstanceEntity.findById(runtimeId, LockModeType.PESSIMISTIC_WRITE);
         if (found == null || "REVOKED".equals(found.status)
                 || !found.registrationExpiresAt.isAfter(Instant.now())) {
@@ -110,7 +110,7 @@ public class RuntimeRegistryService {
         found.credentialVersion = Math.max(1, found.credentialVersion) + 1;
         found.credentialRotatedAt = now;
         auditIntegrity.append(found.organizationId, found.environmentId,
-                "console:system", "RUNTIME_CREDENTIAL_ROTATED", "RUNTIME", found.id.toString(), now, "SUCCESS");
+                actor, "RUNTIME_CREDENTIAL_ROTATED", "RUNTIME", found.id.toString(), now, "SUCCESS");
         return new CredentialRotation(found.id.toString(), raw, found.registrationExpiresAt, found.credentialVersion);
     }
 
