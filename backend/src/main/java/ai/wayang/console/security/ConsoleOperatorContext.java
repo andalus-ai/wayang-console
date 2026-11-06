@@ -9,11 +9,6 @@ import jakarta.ws.rs.NotAuthorizedException;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/**
- * Resolves operator scope exclusively from the verified access token.
- * Expected claims: organization_id and environment_ids (array of UUID strings).
- * Roles: console:runtime:read and console:runtime:admin.
- */
 @RequestScoped
 public class ConsoleOperatorContext {
     @Inject SecurityIdentity identity;
@@ -21,25 +16,25 @@ public class ConsoleOperatorContext {
 
     public UUID organizationId() {
         requireAuthenticated();
-        String value = jwt.getClaim("organization_id");
-        try {
-            return UUID.fromString(value);
-        } catch (RuntimeException e) {
-            throw new ForbiddenException("Operator token has no valid organization_id scope");
-        }
+        try { return UUID.fromString(jwt.getClaim("organization_id")); }
+        catch (RuntimeException e) { throw new ForbiddenException("Operator token has no valid organization_id scope"); }
     }
 
     public Set<UUID> environmentIds() {
         requireAuthenticated();
         Object claim = jwt.getClaim("environment_ids");
-        if (!(claim instanceof Collection<?> values) || values.isEmpty()) {
+        if (!(claim instanceof Collection<?> values) || values.isEmpty())
             throw new ForbiddenException("Operator token has no environment_ids scope");
-        }
         try {
             return values.stream().map(String::valueOf).map(UUID::fromString).collect(Collectors.toUnmodifiableSet());
         } catch (RuntimeException e) {
             throw new ForbiddenException("Operator token contains invalid environment_ids");
         }
+    }
+
+    public String subject() {
+        requireAuthenticated();
+        return jwt.getSubject();
     }
 
     public void requireRead() {
