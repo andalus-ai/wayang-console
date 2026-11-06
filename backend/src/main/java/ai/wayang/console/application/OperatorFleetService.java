@@ -23,6 +23,8 @@ public class OperatorFleetService {
     public record CapabilityView(String componentId, String version, String capability) {}
     public record WorkflowView(String workflowId, String workflowVersion, String definitionDigest, String deploymentId) {}
     public record PageResult(List<RuntimeSummary> items, long total, int page, int size) {}
+    public record AuditView(Instant occurredAt, String actorSubject, String action, String resourceType, String resourceId, String outcome) {}
+    public record AuditPage(List<AuditView> items, long total, int page, int size) {}
     public record TokenResult(String token, Instant expiresAt) {}
 
     @Transactional
@@ -47,8 +49,7 @@ public class OperatorFleetService {
 
     @Transactional
     public PageResult list(UUID organizationId, Set<UUID> environments, String status, int page, int size) {
-        if (environments == null || environments.isEmpty()) throw new NotFoundException("No environments are available in operator scope");
-        if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("page must be >= 0 and size must be 1..100");
+        validatePage(environments, page, size);
         String query = "organizationId = ?1 and environmentId in ?2";
         List<Object> params = new ArrayList<>(List.of(organizationId, environments));
         if (status != null && !status.isBlank()) {
@@ -81,6 +82,23 @@ public class OperatorFleetService {
             runtime.leaseExpiresAt = null;
             audit(organizationId, runtime.environmentId, actor, "RUNTIME_REVOKED", "RUNTIME", runtime.id.toString());
         }
+    }
+
+    @Transactional
+    public AuditPage listAudit(UUID organizationId, Set<UUID> environments, int page, int size) {
+        validatePage(environments, page, size);
+        var query = AuditRecordEntity.find("organizationId = ?1 and environmentId in ?2",
+                Sort.by("occurredAt", Sort.Direction.Descending), organizationId, environments);
+        long total = query.count();
+        List<AuditView> items = query.page(Page.of(page, size)).list().stream()
+                .map(value -> (AuditRecordEntity) value)
+                .map(a -> new AuditView(a.occurredAt, a.actorSubject, a.action, a.resourceType, a.resourceId, a.outcome)).toList();
+        return new AuditPage(items, total, page, size);
+    }
+
+    private void validatePage(Set<UUID> environments, int page, int size) {
+        if (environments == null || environments.isEmpty()) throw new NotFoundException("No environments are available in operator scope");
+        if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("page must be >= 0 and size must be 1..100");
     }
 
     private RuntimeInstanceEntity scopedRuntime(UUID organizationId, Set<UUID> environments, UUID runtimeId) {
