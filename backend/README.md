@@ -55,3 +55,11 @@ mvn -f backend/pom.xml verify
 ## Package boundaries
 
 Keep domain, application, adapter, and bootstrap concerns separate. Do not include workflow execution engines or the full Wayang component catalog.
+
+
+### M1.5 security hardening
+
+- Runtime administrators can rotate a runtime registration credential; the old credential is invalidated atomically and plaintext is returned only once.
+- Audit records are hash-chained per organization/environment and can be checked with the scoped audit verification endpoint.
+- Legacy audit history is retained as a pre-chain baseline; verification covers records appended under the versioned chain format.
+- Hash chaining does not replace external signed checkpoints or immutable audit export for protection against privileged database rewrites.

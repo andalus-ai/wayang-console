@@ -4,7 +4,7 @@ import ai.wayang.console.adapter.persistence.*;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
-import jakarta.ws.rs.ConflictException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.NotFoundException;
 import java.time.Instant;
 import java.time.Duration;
@@ -15,6 +15,7 @@ import io.quarkus.panache.common.Sort;
 @ApplicationScoped
 public class OperatorFleetService {
     @Inject RuntimeRegistryService registry;
+    @Inject AuditIntegrityService auditIntegrity;
 
     public record RuntimeSummary(UUID id, String instanceId, UUID environmentId, String runtimeVersion,
             String deploymentId, String hostname, String platform, String status, String healthStatus,
@@ -31,7 +32,7 @@ public class OperatorFleetService {
     public TokenResult issueToken(UUID organizationId, UUID environmentId, Set<UUID> allowedEnvironments, Duration ttl, String actor) {
         requireEnvironmentScope(environmentId, allowedEnvironments);
         var issued = registry.issueEnrollmentToken(organizationId, environmentId, ttl);
-        audit(organizationId, environmentId, actor, "ENROLLMENT_TOKEN_ISSUED", "ENROLLMENT_TOKEN", issued.tokenId().toString());
+        auditIntegrity.append(organizationId, environmentId, actor, "ENROLLMENT_TOKEN_ISSUED", "ENROLLMENT_TOKEN", issued.tokenId().toString(), Instant.now(), "SUCCESS");
         return new TokenResult(issued.tokenId(), issued.token(), issued.expiresAt());
     }
 
@@ -40,10 +41,10 @@ public class OperatorFleetService {
         EnrollmentTokenEntity token = EnrollmentTokenEntity.findById(tokenId);
         if (token == null || !token.organizationId.equals(organizationId) || !environments.contains(token.environmentId))
             throw new NotFoundException("Enrollment token not found");
-        if (token.consumedAt != null) throw new ConflictException("Enrollment token has already been consumed");
+        if (token.consumedAt != null) throw new WebApplicationException("Enrollment token has already been consumed", 409);
         if (token.revokedAt == null) {
             token.revokedAt = Instant.now();
-            audit(organizationId, token.environmentId, actor, "ENROLLMENT_TOKEN_REVOKED", "ENROLLMENT_TOKEN", token.id.toString());
+            auditIntegrity.append(organizationId, token.environmentId, actor, "ENROLLMENT_TOKEN_REVOKED", "ENROLLMENT_TOKEN", token.id.toString(), Instant.now(), "SUCCESS");
         }
     }
 
@@ -80,8 +81,22 @@ public class OperatorFleetService {
             runtime.status = "REVOKED";
             runtime.registrationExpiresAt = Instant.now();
             runtime.leaseExpiresAt = null;
-            audit(organizationId, runtime.environmentId, actor, "RUNTIME_REVOKED", "RUNTIME", runtime.id.toString());
+            auditIntegrity.append(organizationId, runtime.environmentId, actor, "RUNTIME_REVOKED", "RUNTIME", runtime.id.toString(), Instant.now(), "SUCCESS");
         }
+    }
+
+    @Transactional
+    public RuntimeRegistryService.CredentialRotation rotateCredential(UUID organizationId, Set<UUID> environments,
+            UUID runtimeId, String actor) {
+        RuntimeInstanceEntity runtime = scopedRuntime(organizationId, environments, runtimeId);
+        return registry.rotateCredential(runtime.id, actor);
+    }
+
+    @Transactional
+    public AuditIntegrityService.VerificationResult verifyAudit(UUID organizationId, Set<UUID> environments,
+            UUID environmentId) {
+        requireEnvironmentScope(environmentId, environments);
+        return auditIntegrity.verify(organizationId, environmentId);
     }
 
     @Transactional
@@ -118,17 +133,4 @@ public class OperatorFleetService {
             throw new NotFoundException("Environment not found");
     }
 
-    private void audit(UUID org, UUID env, String actor, String action, String type, String id) {
-        AuditRecordEntity record = new AuditRecordEntity();
-        record.id = UUID.randomUUID();
-        record.organizationId = org;
-        record.environmentId = env;
-        record.actorSubject = actor == null || actor.isBlank() ? "unknown" : actor;
-        record.action = action;
-        record.resourceType = type;
-        record.resourceId = id;
-        record.occurredAt = Instant.now();
-        record.outcome = "SUCCESS";
-        record.persist();
-    }
 }

@@ -41,3 +41,11 @@ Early implementation. Production use still requires configured OIDC/TLS, gateway
 ## Development
 
 Backend requirements and commands are documented in [backend/README.md](backend/README.md). The frontend setup is documented in [console-web/README.md](console-web/README.md).
+
+
+### M1.5 security hardening
+
+- Runtime administrators can rotate a runtime registration credential; the old credential is invalidated atomically and plaintext is returned only once.
+- Audit records are hash-chained per organization/environment and can be checked with the scoped audit verification endpoint.
+- Legacy audit history is retained as a pre-chain baseline; verification covers records appended under the versioned chain format.
+- Hash chaining does not replace external signed checkpoints or immutable audit export for protection against privileged database rewrites.

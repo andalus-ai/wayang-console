@@ -86,3 +86,22 @@ Database-level immutability, retention policies, export, and tamper-evident chai
 - Add operator UI only after the API contract is accepted.
 
 The Console remains a management plane. Revoking a registration credential blocks future authenticated management traffic from that runtime; it does not terminate workflows already executing on the runtime.
+
+
+## Runtime credential rotation
+
+Runtime credentials are 256-bit opaque bearer tokens. The Console stores only SHA-256 digests. A runtime administrator can rotate a credential using:
+
+`POST /api/v1/console/runtimes/{runtimeId}/rotate-credential`
+
+The response contains the new token exactly once, its expiry, and the incremented credential version. Rotation is atomic: the previous token stops authenticating as soon as the transaction commits. The runtime must receive and persist the new token securely before discarding its old local copy. If the response is lost, an administrator must rotate again; the Console does not retain recoverable plaintext credentials. Revoked or expired runtimes cannot be rotated.
+
+## Tamper-evident audit chain
+
+Audit records are sequenced and hash-chained independently for each organization/environment scope. Each record binds the scope, sequence, prior hash, actor, action, resource, timestamp, outcome, and hash schema version. The chain head is updated in the same database transaction as the audit append, under a row lock for that scope. Legacy audit rows are preserved and marked as legacy, with a null chain sequence; each new v1 chain starts at sequence 1.
+
+Administrators can verify a chain using:
+
+`GET /api/v1/console/audit/verify?environmentId={environmentId}`
+
+The verifier reports the number of verified records, validity, the first invalid sequence when detected, and stored/computed heads. The hash chain is tamper-evident, not tamper-proof: a database administrator able to rewrite both records and chain head could reconstruct it. Production deployments should periodically export signed checkpoints to an independent immutable store. Audit payloads must not contain secrets, bearer tokens, or raw credentials.
