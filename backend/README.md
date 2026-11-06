@@ -44,6 +44,14 @@ Do not expose operator routes until the issuer, signing-key validation, TLS, rol
 
 Management commands remain disabled. Runtime revocation invalidates the credential; it does not terminate workflows already executing on the runtime.
 
+## Integration tests
+
+The backend integration suite starts an isolated PostgreSQL 16 container through Testcontainers, applies the Liquibase changelog, and exercises enrollment, revocation, inventory replacement, scope isolation, and pagination. Docker must be available to run the suite:
+
+```bash
+mvn -f backend/pom.xml verify
+```
+
 ## Package boundaries
 
 Keep domain, application, adapter, and bootstrap concerns separate. Do not include workflow execution engines or the full Wayang component catalog.
