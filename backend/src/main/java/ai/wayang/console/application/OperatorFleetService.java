@@ -26,10 +26,10 @@ public class OperatorFleetService {
     public record TokenResult(String token, Instant expiresAt) {}
 
     @Transactional
-    public TokenResult issueToken(UUID organizationId, UUID environmentId, Set<UUID> allowedEnvironments, Duration ttl) {
+    public TokenResult issueToken(UUID organizationId, UUID environmentId, Set<UUID> allowedEnvironments, Duration ttl, String actor) {
         requireEnvironmentScope(environmentId, allowedEnvironments);
         var issued = registry.issueEnrollmentToken(organizationId, environmentId, ttl);
-        audit(organizationId, environmentId, "operator", "ENROLLMENT_TOKEN_ISSUED", "ENROLLMENT_TOKEN", "issued");
+        audit(organizationId, environmentId, actor, "ENROLLMENT_TOKEN_ISSUED", "ENROLLMENT_TOKEN", "issued");
         return new TokenResult(issued.token(), issued.expiresAt());
     }
 
