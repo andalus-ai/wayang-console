@@ -14,7 +14,7 @@ import java.util.UUID;
 public class AuditRecordEntity extends PanacheEntityBase {
     @Id public UUID id;
     @Column(name = "organization_id", nullable = false) public UUID organizationId;
-    @Column(name = "environment_id", nullable = false) public UUID environmentId;
+    @Column(name = "environment_id") public UUID environmentId;
     @Column(name = "actor_subject", nullable = false, length = 255) public String actorSubject;
     @Column(name = "action", nullable = false, length = 100) public String action;
     @Column(name = "resource_type", nullable = false, length = 80) public String resourceType;
