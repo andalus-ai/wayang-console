@@ -63,3 +63,39 @@ databaseChangeLog:
         - dropTable: { tableName: wc_runtime_capability }
         - dropTable: { tableName: wc_runtime_instance }
         - dropTable: { tableName: wc_enrollment_token }
+
+  - changeSet:
+      id: 002-operator-fleet-security-audit
+      author: andalus-ai
+      changes:
+        - addColumn:
+            tableName: wc_enrollment_token
+            columns:
+              - column: { name: revoked_at, type: TIMESTAMP WITH TIME ZONE }
+        - createTable:
+            tableName: wc_audit_record
+            columns:
+              - column: { name: id, type: UUID, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: organization_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: environment_id, type: UUID }
+              - column: { name: actor_subject, type: VARCHAR(255), constraints: { nullable: false } }
+              - column: { name: action, type: VARCHAR(100), constraints: { nullable: false } }
+              - column: { name: resource_type, type: VARCHAR(80), constraints: { nullable: false } }
+              - column: { name: resource_id, type: VARCHAR(180), constraints: { nullable: false } }
+              - column: { name: occurred_at, type: TIMESTAMP WITH TIME ZONE, constraints: { nullable: false } }
+              - column: { name: outcome, type: VARCHAR(24), constraints: { nullable: false } }
+        - createIndex:
+            tableName: wc_audit_record
+            indexName: idx_wc_audit_scope_time
+            columns:
+              - column: { name: organization_id }
+              - column: { name: occurred_at }
+        - createIndex:
+            tableName: wc_audit_record
+            indexName: idx_wc_audit_resource
+            columns:
+              - column: { name: resource_type }
+              - column: { name: resource_id }
+      rollback:
+        - dropTable: { tableName: wc_audit_record }
+        - dropColumn: { tableName: wc_enrollment_token, columnName: revoked_at }
