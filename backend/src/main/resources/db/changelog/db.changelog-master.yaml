@@ -111,6 +111,18 @@ databaseChangeLog:
               - column: { name: hash_version, type: VARCHAR(16), defaultValue: legacy, constraints: { nullable: false } }
               - column: { name: previous_hash, type: VARCHAR(64), defaultValue: "0000000000000000000000000000000000000000000000000000000000000000", constraints: { nullable: false } }
               - column: { name: record_hash, type: VARCHAR(64), defaultValue: "0000000000000000000000000000000000000000000000000000000000000000", constraints: { nullable: false } }
+        - sql:
+            sql: |
+              UPDATE wc_audit_record target
+              SET sequence_no = ranked.sequence_no
+              FROM (
+                SELECT id, ROW_NUMBER() OVER (
+                  PARTITION BY organization_id, environment_id
+                  ORDER BY occurred_at, id
+                ) AS sequence_no
+                FROM wc_audit_record
+              ) ranked
+              WHERE target.id = ranked.id;
         - createTable:
             tableName: wc_audit_chain_head
             columns:
@@ -118,6 +130,14 @@ databaseChangeLog:
               - column: { name: environment_id, type: UUID, constraints: { nullable: false } }
               - column: { name: last_sequence, type: BIGINT, constraints: { nullable: false } }
               - column: { name: last_hash, type: VARCHAR(64), constraints: { nullable: false } }
+        - sql:
+            sql: |
+              INSERT INTO wc_audit_chain_head (organization_id, environment_id, last_sequence, last_hash)
+              SELECT organization_id, environment_id, MAX(sequence_no),
+                '0000000000000000000000000000000000000000000000000000000000000000'
+              FROM wc_audit_record
+              WHERE environment_id IS NOT NULL
+              GROUP BY organization_id, environment_id;
         - addPrimaryKey:
             tableName: wc_audit_chain_head
             columnNames: organization_id, environment_id
