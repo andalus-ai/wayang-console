@@ -16,6 +16,7 @@ import io.quarkus.panache.common.Sort;
 public class OperatorFleetService {
     @Inject RuntimeRegistryService registry;
     @Inject AuditIntegrityService auditIntegrity;
+    @Inject AuditIntegrityService auditIntegrity;
 
     public record RuntimeSummary(UUID id, String instanceId, UUID environmentId, String runtimeVersion,
             String deploymentId, String hostname, String platform, String status, String healthStatus,
