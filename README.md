@@ -22,22 +22,20 @@ It manages independently deployed Wayang runtimes across development, staging, p
 7. Workflow definitions are inspected as metadata/artifacts; Console does not execute them.
 8. Community deployments retain a complete basic registration and management path.
 
-## Initial implementation
+## Implemented backend slices
 
-This repository starts with the control-plane foundation:
+- Quarkus backend foundation and PostgreSQL/Liquibase persistence.
+- One-time runtime enrollment with SHA-256 credential digests and one-time plaintext delivery.
+- Runtime heartbeat leases and bounded capability/workflow inventory reporting.
+- JWT-authenticated operator APIs for scoped fleet listing, runtime detail, enrollment-token issuance/revocation, runtime credential revocation, and audit history.
+- Environment and organization boundaries resolved from verified JWT claims.
+- Management commands remain disabled; the Console does not remotely stop runtime workloads.
 
-- Management API contract for registration, heartbeat, capabilities, inventory, and commands.
-- Domain model for organizations, environments, runtime instances, deployments, and commands.
-- Quarkus backend foundation.
-- PostgreSQL-ready persistence boundary with a development-friendly local profile.
-- Explicit adapter boundaries for identity, tenancy, audit, secrets, and event transport.
-- Console frontend boundary, independently deployable from the backend.
-
-See [docs/architecture/README.md](docs/architecture/README.md) and [docs/roadmap/IMPLEMENTATION-ROADMAP.md](docs/roadmap/IMPLEMENTATION-ROADMAP.md).
+Operator identity and claim requirements are documented in [Operator authentication and fleet API](docs/security/operator-authentication-and-fleet-api.md).
 
 ## Status
 
-Early foundation. APIs and schemas are versioned proposals until implementation and compatibility tests establish them as stable. Do not treat the initial contracts as a production-ready remote command channel.
+Early implementation. The APIs are not yet a production-ready control plane: configure JWT verification, TLS, gateway rate limiting, and database-backed integration tests before production use. Deployment management, digital twin reconciliation, and remote management commands remain later milestones.
 
 ## Development
 
