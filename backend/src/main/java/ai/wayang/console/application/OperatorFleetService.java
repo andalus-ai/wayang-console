@@ -87,6 +87,20 @@ public class OperatorFleetService {
     }
 
     @Transactional
+    public RuntimeRegistryService.CredentialRotation rotateCredential(UUID organizationId, Set<UUID> environments,
+            UUID runtimeId, String actor) {
+        RuntimeInstanceEntity runtime = scopedRuntime(organizationId, environments, runtimeId);
+        return registry.rotateCredential(runtime.id, actor);
+    }
+
+    @Transactional
+    public AuditIntegrityService.VerificationResult verifyAudit(UUID organizationId, Set<UUID> environments,
+            UUID environmentId) {
+        requireEnvironmentScope(environmentId, environments);
+        return auditIntegrity.verify(organizationId, environmentId);
+    }
+
+    @Transactional
     public AuditPage listAudit(UUID organizationId, Set<UUID> environments, int page, int size) {
         validatePage(environments, page, size);
         var query = AuditRecordEntity.find("organizationId = ?1 and environmentId in ?2",
