@@ -2,15 +2,20 @@ package ai.wayang.console.application;
 
 import ai.wayang.console.adapter.persistence.*;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
+import jakarta.ws.rs.ConflictException;
+import jakarta.ws.rs.NotFoundException;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.*;
-import java.util.stream.Collectors;
 import io.quarkus.panache.common.Page;
 import io.quarkus.panache.common.Sort;
 
 @ApplicationScoped
 public class OperatorFleetService {
+    @Inject RuntimeRegistryService registry;
+
     public record RuntimeSummary(UUID id, String instanceId, UUID environmentId, String runtimeVersion,
             String deploymentId, String hostname, String platform, String status, String healthStatus,
             Instant registeredAt, Instant lastSeenAt, Instant leaseExpiresAt) {}
@@ -21,10 +26,10 @@ public class OperatorFleetService {
     public record TokenResult(String token, Instant expiresAt) {}
 
     @Transactional
-    public TokenResult issueToken(UUID organizationId, UUID environmentId, Set<UUID> allowedEnvironments,
-                                  java.time.Duration ttl) {
+    public TokenResult issueToken(UUID organizationId, UUID environmentId, Set<UUID> allowedEnvironments, Duration ttl) {
         requireEnvironmentScope(environmentId, allowedEnvironments);
-        var issued = new RuntimeRegistryService().issueEnrollmentToken(organizationId, environmentId, ttl);
+        var issued = registry.issueEnrollmentToken(organizationId, environmentId, ttl);
+        audit(organizationId, environmentId, "operator", "ENROLLMENT_TOKEN_ISSUED", "ENROLLMENT_TOKEN", "issued");
         return new TokenResult(issued.token(), issued.expiresAt());
     }
 
@@ -32,14 +37,17 @@ public class OperatorFleetService {
     public void revokeEnrollmentToken(UUID organizationId, UUID tokenId, Set<UUID> environments, String actor) {
         EnrollmentTokenEntity token = EnrollmentTokenEntity.findById(tokenId);
         if (token == null || !token.organizationId.equals(organizationId) || !environments.contains(token.environmentId))
-            throw new jakarta.ws.rs.NotFoundException("Enrollment token not found");
-        if (token.consumedAt != null) throw new jakarta.ws.rs.ConflictException("Enrollment token has already been consumed");
-        if (token.revokedAt == null) token.revokedAt = Instant.now();
-        audit(organizationId, token.environmentId, actor, "ENROLLMENT_TOKEN_REVOKED", "ENROLLMENT_TOKEN", token.id.toString());
+            throw new NotFoundException("Enrollment token not found");
+        if (token.consumedAt != null) throw new ConflictException("Enrollment token has already been consumed");
+        if (token.revokedAt == null) {
+            token.revokedAt = Instant.now();
+            audit(organizationId, token.environmentId, actor, "ENROLLMENT_TOKEN_REVOKED", "ENROLLMENT_TOKEN", token.id.toString());
+        }
     }
 
     @Transactional
     public PageResult list(UUID organizationId, Set<UUID> environments, String status, int page, int size) {
+        if (environments == null || environments.isEmpty()) throw new NotFoundException("No environments are available in operator scope");
         if (page < 0 || size < 1 || size > 100) throw new IllegalArgumentException("page must be >= 0 and size must be 1..100");
         String query = "organizationId = ?1 and environmentId in ?2";
         List<Object> params = new ArrayList<>(List.of(organizationId, environments));
@@ -67,16 +75,18 @@ public class OperatorFleetService {
     @Transactional
     public void revokeRuntime(UUID organizationId, Set<UUID> environments, UUID runtimeId, String actor) {
         RuntimeInstanceEntity runtime = scopedRuntime(organizationId, environments, runtimeId);
-        runtime.status = "REVOKED";
-        runtime.registrationExpiresAt = Instant.now();
-        runtime.leaseExpiresAt = null;
-        audit(organizationId, runtime.environmentId, actor, "RUNTIME_REVOKED", "RUNTIME", runtime.id.toString());
+        if (!"REVOKED".equals(runtime.status)) {
+            runtime.status = "REVOKED";
+            runtime.registrationExpiresAt = Instant.now();
+            runtime.leaseExpiresAt = null;
+            audit(organizationId, runtime.environmentId, actor, "RUNTIME_REVOKED", "RUNTIME", runtime.id.toString());
+        }
     }
 
     private RuntimeInstanceEntity scopedRuntime(UUID organizationId, Set<UUID> environments, UUID runtimeId) {
         RuntimeInstanceEntity runtime = RuntimeInstanceEntity.findById(runtimeId);
         if (runtime == null || !organizationId.equals(runtime.organizationId) || !environments.contains(runtime.environmentId))
-            throw new jakarta.ws.rs.NotFoundException("Runtime not found");
+            throw new NotFoundException("Runtime not found");
         return runtime;
     }
 
@@ -87,7 +97,7 @@ public class OperatorFleetService {
 
     private static void requireEnvironmentScope(UUID environmentId, Set<UUID> allowed) {
         if (environmentId == null || allowed == null || !allowed.contains(environmentId))
-            throw new jakarta.ws.rs.NotFoundException("Environment not found");
+            throw new NotFoundException("Environment not found");
     }
 
     private void audit(UUID org, UUID env, String actor, String action, String type, String id) {
