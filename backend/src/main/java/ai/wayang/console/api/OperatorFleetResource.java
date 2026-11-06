@@ -60,6 +60,27 @@ public class OperatorFleetResource {
         fleet.revokeRuntime(operator.organizationId(), operator.environmentIds(), runtimeId, operator.subject());
     }
 
+    public record RotateCredentialResponse(String runtimeId, String token, java.time.Instant expiresAt,
+            long credentialVersion) {}
+
+    @POST
+    @Path("/runtimes/{runtimeId}/rotate-credential")
+    public RotateCredentialResponse rotateCredential(@PathParam("runtimeId") UUID runtimeId) {
+        operator.requireAdmin();
+        var result = fleet.rotateCredential(operator.organizationId(), operator.environmentIds(),
+                runtimeId, operator.subject());
+        return new RotateCredentialResponse(result.runtimeId(), result.token(), result.expiresAt(), result.credentialVersion());
+    }
+
+    @GET
+    @Path("/audit/verify")
+    public ai.wayang.console.application.AuditIntegrityService.VerificationResult verifyAudit(
+            @QueryParam("environmentId") UUID environmentId) {
+        operator.requireAdmin();
+        if (environmentId == null) throw new BadRequestException("environmentId is required");
+        return fleet.verifyAudit(operator.organizationId(), operator.environmentIds(), environmentId);
+    }
+
     @GET
     @Path("/audit")
     public OperatorFleetService.AuditPage audit(@DefaultValue("0") @QueryParam("page") int page,
