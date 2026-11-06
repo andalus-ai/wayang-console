@@ -20,7 +20,7 @@ public class RuntimeRegistryService {
     private static final Duration LEASE_TTL = Duration.ofMinutes(2);
     private static final int HEARTBEAT_SECONDS = 30;
 
-    public record IssuedEnrollmentToken(String token, Instant expiresAt) {}
+    public record IssuedEnrollmentToken(UUID tokenId, String token, Instant expiresAt) {}
 
     @Transactional
     public IssuedEnrollmentToken issueEnrollmentToken(UUID organizationId, UUID environmentId, Duration ttl) {
@@ -37,7 +37,7 @@ public class RuntimeRegistryService {
         entity.createdAt = now;
         entity.expiresAt = now.plus(ttl);
         entity.persist();
-        return new IssuedEnrollmentToken(raw, entity.expiresAt);
+        return new IssuedEnrollmentToken(entity.id, raw, entity.expiresAt);
     }
 
     public record EnrollmentResult(String registrationId, String registrationToken, Instant registrationExpiresAt,
