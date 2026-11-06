@@ -19,8 +19,8 @@ public class RuntimeInventoryService {
         RuntimeInstanceEntity runtime = RuntimeInstanceEntity.findById(runtimeId);
         if (runtime == null) throw new IllegalArgumentException("Runtime not found");
 
-        List<CapabilityInput> safeCapabilities = capabilities == null ? List.of() : List.copyOf(capabilities);
-        List<WorkflowInput> safeWorkflows = workflows == null ? List.of() : List.copyOf(workflows);
+        List<CapabilityInput> safeCapabilities = capabilities == null ? List.of() : new java.util.ArrayList<>(capabilities);
+        List<WorkflowInput> safeWorkflows = workflows == null ? List.of() : new java.util.ArrayList<>(workflows);
         if (safeCapabilities.size() > 1000 || safeWorkflows.size() > 1000)
             throw new IllegalArgumentException("Inventory report exceeds the 1000-item limit per collection");
 
