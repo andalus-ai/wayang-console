@@ -21,7 +21,7 @@ public class AuditRecordEntity extends PanacheEntityBase {
     @Column(name = "resource_id", nullable = false, length = 180) public String resourceId;
     @Column(name = "occurred_at", nullable = false) public Instant occurredAt;
     @Column(name = "outcome", nullable = false, length = 24) public String outcome;
-    @Column(name = "sequence_no", nullable = false) public long sequenceNo;
+    @Column(name = "sequence_no") public Long sequenceNo;
     @Column(name = "hash_version", nullable = false, length = 16) public String hashVersion;
     @Column(name = "previous_hash", nullable = false, length = 64) public String previousHash;
     @Column(name = "record_hash", nullable = false, length = 64) public String recordHash;
