@@ -1,0 +1,81 @@
+syntax = "proto3";
+package wayang.management.v1;
+option java_multiple_files = true;
+option java_package = "ai.wayang.console.contracts.management.v1";
+import "google/protobuf/timestamp.proto";
+
+service RuntimeManagement {
+  rpc Register(RegisterRuntimeRequest) returns (RegisterRuntimeResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc ReportInventory(InventoryReportRequest) returns (InventoryReportResponse);
+  rpc PollCommands(PollCommandsRequest) returns (PollCommandsResponse);
+  rpc AcknowledgeCommand(AcknowledgeCommandRequest) returns (AcknowledgeCommandResponse);
+}
+
+message RuntimeIdentity {
+  string instance_id = 1;
+  string runtime_version = 2;
+  string deployment_id = 3;
+  string environment_id = 4;
+}
+message ComponentCapability {
+  string component_id = 1;
+  string version = 2;
+  string capability = 3;
+}
+message WorkflowReference {
+  string workflow_id = 1;
+  string workflow_version = 2;
+  string definition_digest = 3;
+  string deployment_id = 4;
+}
+message RegisterRuntimeRequest {
+  RuntimeIdentity identity = 1;
+  string hostname = 2;
+  string platform = 3;
+  repeated string supported_protocol_versions = 4;
+}
+message RegisterRuntimeResponse {
+  string registration_id = 1;
+  google.protobuf.Timestamp lease_expires_at = 2;
+  uint32 heartbeat_interval_seconds = 3;
+  string negotiated_protocol_version = 4;
+}
+message HeartbeatRequest {
+  string instance_id = 1;
+  string registration_id = 2;
+  string health = 3;
+  google.protobuf.Timestamp observed_at = 4;
+}
+message HeartbeatResponse {
+  google.protobuf.Timestamp lease_expires_at = 1;
+  uint32 heartbeat_interval_seconds = 2;
+}
+message InventoryReportRequest {
+  string instance_id = 1;
+  string registration_id = 2;
+  repeated ComponentCapability capabilities = 3;
+  repeated WorkflowReference workflows = 4;
+}
+message InventoryReportResponse { string accepted_revision = 1; }
+message PollCommandsRequest {
+  string instance_id = 1;
+  string registration_id = 2;
+  uint32 max_commands = 3;
+}
+message ManagementCommand {
+  string command_id = 1;
+  string idempotency_key = 2;
+  string command_type = 3;
+  bytes typed_payload = 4;
+  google.protobuf.Timestamp expires_at = 5;
+}
+message PollCommandsResponse { repeated ManagementCommand commands = 1; }
+message AcknowledgeCommandRequest {
+  string instance_id = 1;
+  string registration_id = 2;
+  string command_id = 3;
+  string status = 4;
+  string message = 5;
+}
+message AcknowledgeCommandResponse { bool accepted = 1; }
