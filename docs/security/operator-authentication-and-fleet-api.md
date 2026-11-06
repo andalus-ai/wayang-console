@@ -98,7 +98,7 @@ The response contains the new token exactly once, its expiry, and the incremente
 
 ## Tamper-evident audit chain
 
-Audit records are sequenced and hash-chained independently for each organization/environment scope. Each record binds the scope, sequence, prior hash, actor, action, resource, timestamp, outcome, and hash schema version. The chain head is updated in the same database transaction as the audit append, under a row lock for that scope. Legacy audit rows are preserved and marked as legacy; the new chain starts after the legacy sequence boundary.
+Audit records are sequenced and hash-chained independently for each organization/environment scope. Each record binds the scope, sequence, prior hash, actor, action, resource, timestamp, outcome, and hash schema version. The chain head is updated in the same database transaction as the audit append, under a row lock for that scope. Legacy audit rows are preserved and marked as legacy, with a null chain sequence; each new v1 chain starts at sequence 1.
 
 Administrators can verify a chain using:
 
