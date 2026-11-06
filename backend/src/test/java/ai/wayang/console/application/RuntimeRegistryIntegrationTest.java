@@ -66,14 +66,14 @@ class RuntimeRegistryIntegrationTest {
         var tokenA = registry.issueEnrollmentToken(organizationA, environmentA, Duration.ofHours(1));
         var tokenB = registry.issueEnrollmentToken(organizationB, environmentB, Duration.ofHours(1));
         var runtimeA = registry.enroll(tokenA.token(), "scope-runtime-a", "1.0.0", null, null, null);
-        registry.enroll(tokenB.token(), "scope-runtime-b", "1.0.0", null, null, null);
+        var runtimeB = registry.enroll(tokenB.token(), "scope-runtime-b", "1.0.0", null, null, null);
 
         var page = fleet.list(organizationA, Set.of(environmentA), null, 0, 25);
         assertEquals(1, page.total());
         assertEquals("scope-runtime-a", page.items().getFirst().instanceId());
 
         assertThrows(NotFoundException.class, () -> fleet.get(organizationA, Set.of(environmentA),
-                UUID.fromString(registry.enroll(tokenB.token(), "scope-runtime-c", "1.0.0", null, null, null).registrationId())));
+                UUID.fromString(runtimeB.registrationId())));
     }
 
     @Test
