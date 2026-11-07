@@ -49,3 +49,10 @@ Backend requirements and commands are documented in [backend/README.md](backend/
 - Audit records are hash-chained per organization/environment and can be checked with the scoped audit verification endpoint.
 - Legacy audit history is retained as a pre-chain baseline; verification covers records appended under the versioned chain format.
 - Hash chaining does not replace external signed checkpoints or immutable audit export for protection against privileged database rewrites.
+
+
+### M1.6 deployment lifecycle
+
+- Console now tracks scoped deployment records, artifact/manifest digests, and guarded lifecycle transitions.
+- Deployment lifecycle APIs are management metadata only; runtime command delivery, artifact signature verification, and desired/observed reconciliation remain subsequent work.
+- See [deployment lifecycle](docs/deployment/deployment-lifecycle.md).
