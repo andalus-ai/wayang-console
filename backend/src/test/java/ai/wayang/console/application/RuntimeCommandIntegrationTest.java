@@ -33,6 +33,8 @@ class RuntimeCommandIntegrationTest {
         deployments.transition(organization, Set.of(environment), deployment.id(), "READY", null, "operator-test");
 
         var command = commands.dispatch(organization, Set.of(environment), deployment.id(), "operator-test");
+        assertThrows(jakarta.ws.rs.WebApplicationException.class, () -> deployments.transition(
+                organization, Set.of(environment), deployment.id(), "DEPLOYED", null, "operator-test"));
         var repeated = commands.dispatch(organization, Set.of(environment), deployment.id(), "operator-test");
         assertEquals(command.commandId(), repeated.commandId());
         assertTrue(command.typedPayload().contains("sample.workflow"));
