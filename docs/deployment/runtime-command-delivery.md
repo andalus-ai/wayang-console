@@ -24,7 +24,7 @@ A command is scoped to the runtime that enrolled with the Console. A runtime can
 - At-least-once delivery; runtimes must deduplicate by `commandId` or `idempotencyKey`.
 - Dispatch is idempotent per deployment using a stable key.
 - Poll leases expire after 60 seconds; a RUNNING command becomes eligible for redelivery after a 2-minute execution lease expires.
-- Commands expire after 30 minutes and stop being delivered.
+- Commands expire after 30 minutes and stop being delivered; a scheduled sweeper marks overdue commands and associated in-flight deployments failed even if the runtime never polls again.
 - Delivery is capped at 12 attempts; exhausted or expired commands fail the associated deployment.
 - A successful runtime acknowledgement is the only path that marks a deployment DEPLOYED. Operator transition APIs cannot set DEPLOYED directly.
 
