@@ -1,7 +1,6 @@
 package ai.wayang.console.api;
 
 import ai.wayang.console.application.RuntimeCommandService;
-import ai.wayang.console.application.RuntimeRegistryService;
 import ai.wayang.console.security.ConsoleOperatorContext;
 import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
