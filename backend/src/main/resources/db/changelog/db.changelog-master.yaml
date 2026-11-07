@@ -190,7 +190,6 @@ databaseChangeLog:
       rollback:
         - dropTable: { tableName: wc_deployment }
 
-databaseChangeLog:
   - changeSet:
       id: 005-runtime-command-delivery
       author: andalus-ai
