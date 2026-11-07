@@ -2,6 +2,7 @@ package ai.wayang.console.api;
 
 import ai.wayang.console.application.DeploymentLifecycleService;
 import ai.wayang.console.security.ConsoleOperatorContext;
+import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
