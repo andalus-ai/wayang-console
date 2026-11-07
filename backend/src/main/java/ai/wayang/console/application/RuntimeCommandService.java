@@ -7,6 +7,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.persistence.LockModeType;
 import jakarta.transaction.Transactional;
+import io.quarkus.scheduler.Scheduled;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import java.time.Duration;
@@ -90,6 +91,16 @@ public class RuntimeCommandService {
                 runtime.id(), now).withLock(LockModeType.PESSIMISTIC_WRITE).list();
         expired.forEach(command -> expire(command, now, "Command expired before completion"));
         return new CommandPage(result);
+    }
+
+    @Scheduled(every = "30s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    @Transactional
+    void expireOverdueCommands() {
+        Instant now = Instant.now();
+        List<ManagementCommandEntity> overdue = ManagementCommandEntity.find(
+                "status in ('PENDING','LEASED','RUNNING') and expiresAt <= ?1 order by expiresAt", now)
+                .withLock(LockModeType.PESSIMISTIC_WRITE).range(0, 199).list();
+        overdue.forEach(command -> expire(command, now, "Command expired before completion"));
     }
 
     @Transactional
