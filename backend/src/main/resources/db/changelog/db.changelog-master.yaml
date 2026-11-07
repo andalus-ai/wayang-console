@@ -147,3 +147,45 @@ databaseChangeLog:
         - dropColumn: { tableName: wc_audit_record, columnName: previous_hash }
         - dropColumn: { tableName: wc_audit_record, columnName: hash_version }
         - dropColumn: { tableName: wc_audit_record, columnName: sequence_no }
+
+  - changeSet:
+      id: 004-deployment-lifecycle
+      author: andalus-ai
+      changes:
+        - createTable:
+            tableName: wc_deployment
+            columns:
+              - column: { name: id, type: UUID, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: deployment_id, type: VARCHAR(160), constraints: { nullable: false } }
+              - column: { name: organization_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: environment_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: runtime_id, type: UUID }
+              - column: { name: workflow_id, type: VARCHAR(180), constraints: { nullable: false } }
+              - column: { name: workflow_version, type: VARCHAR(80), constraints: { nullable: false } }
+              - column: { name: artifact_digest, type: VARCHAR(128), constraints: { nullable: false } }
+              - column: { name: manifest_digest, type: VARCHAR(128), constraints: { nullable: false } }
+              - column: { name: status, type: VARCHAR(24), constraints: { nullable: false } }
+              - column: { name: requested_by, type: VARCHAR(255), constraints: { nullable: false } }
+              - column: { name: created_at, type: TIMESTAMP WITH TIME ZONE, constraints: { nullable: false } }
+              - column: { name: updated_at, type: TIMESTAMP WITH TIME ZONE, constraints: { nullable: false } }
+              - column: { name: completed_at, type: TIMESTAMP WITH TIME ZONE }
+              - column: { name: failure_reason, type: VARCHAR(1000) }
+        - addUniqueConstraint:
+            tableName: wc_deployment
+            columnNames: organization_id, environment_id, deployment_id
+            constraintName: uk_wc_deployment_scope_id
+        - createIndex:
+            tableName: wc_deployment
+            indexName: idx_wc_deployment_scope
+            columns:
+              - column: { name: organization_id }
+              - column: { name: environment_id }
+              - column: { name: created_at }
+        - createIndex:
+            tableName: wc_deployment
+            indexName: idx_wc_deployment_runtime
+            columns:
+              - column: { name: runtime_id }
+              - column: { name: created_at }
+      rollback:
+        - dropTable: { tableName: wc_deployment }
