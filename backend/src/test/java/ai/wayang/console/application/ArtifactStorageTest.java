@@ -12,5 +12,5 @@ class ArtifactStorageTest{
   assertThrows(IOException.class,()->s.put(org,env,"sha256:"+"0".repeat(64),new ByteArrayInputStream(b),1024));
   s.delete(stored.objectKey());assertThrows(IOException.class,()->s.open(stored.objectKey()));
  }
- @Test void rejectsTraversalKeys(){var s=new LocalArtifactStorage();s.configuredRoot=temp.toString();assertThrows(IOException.class,()->s.open("../../etc/passwd"));}
+ @Test void enforcesMaximumSizeWhileStreaming(){var s=new LocalArtifactStorage();s.configuredRoot=temp.toString();UUID org=UUID.randomUUID(),env=UUID.randomUUID();assertThrows(IOException.class,()->s.put(org,env,"sha256:"+"0".repeat(64),new ByteArrayInputStream(new byte[16]),8));}\n @Test void rejectsTraversalKeys(){var s=new LocalArtifactStorage();s.configuredRoot=temp.toString();assertThrows(IOException.class,()->s.open("../../etc/passwd"));}
 }
