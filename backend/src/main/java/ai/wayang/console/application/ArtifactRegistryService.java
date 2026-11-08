@@ -51,6 +51,25 @@ public class ArtifactRegistryService {
   ArtifactEntity a=ArtifactEntity.find("organizationId = ?1 and environmentId = ?2 and artifactDigest = ?3",org,env,digest.toLowerCase()).firstResult();
   if(a==null||!a.manifestDigest.equalsIgnoreCase(manifest))throw new WebApplicationException("Verified artifact and manifest are required",409);
  }
+ @Transactional public Download openApprovedPluginForRuntime(RuntimeRegistryService.AuthenticatedRuntime runtime,String pluginId,String version){
+  PluginCatalogEntryEntity entry=PluginCatalogEntryEntity.find(
+   "organizationId = ?1 and environmentId = ?2 and pluginId = ?3 and pluginVersion = ?4",
+   runtime.organizationId(),runtime.environmentId(),pluginId,version).firstResult();
+  if(entry==null)throw new NotFoundException("Plugin version not found");
+  PluginApprovalEntity approval=PluginApprovalEntity.find("catalogEntryId",entry.id).firstResult();
+  if(approval==null||!"APPROVED".equals(approval.approvalStatus))throw new WebApplicationException("Plugin version is not approved for distribution",403);
+  PluginCatalogGovernanceEntity governance=PluginCatalogGovernanceEntity.find("catalogEntryId",entry.id).firstResult();
+  if(governance!=null&&!"ACTIVE".equals(governance.lifecycleStatus))throw new WebApplicationException("Plugin version is not active",403);
+  List<ArtifactEntity> matches=ArtifactEntity.list("organizationId = ?1 and environmentId = ?2 and manifestDigest = ?3",
+   runtime.organizationId(),runtime.environmentId(),entry.manifestDigest);
+  for(ArtifactEntity artifact:matches){
+   try{
+    verify(runtime.organizationId(),runtime.environmentId(),artifact.artifactDigest,artifact.manifestDigest,artifact.signingKeyId,artifact.signature);
+    return openForRuntime(runtime,artifact.artifactDigest);
+   }catch(WebApplicationException invalid){ /* try another artifact for the same immutable manifest */ }
+  }
+  throw new WebApplicationException("No currently trusted artifact is available for this approved plugin",409);
+ }
  @Transactional public Download openForRuntime(RuntimeRegistryService.AuthenticatedRuntime runtime,String digest){
   validateDigest(digest,"artifactDigest");
   ArtifactEntity a=ArtifactEntity.find("organizationId = ?1 and environmentId = ?2 and artifactDigest = ?3",runtime.organizationId(),runtime.environmentId(),digest.toLowerCase()).firstResult();
