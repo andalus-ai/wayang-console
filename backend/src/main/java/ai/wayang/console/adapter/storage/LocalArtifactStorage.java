@@ -9,7 +9,7 @@ import java.security.*;
 import java.util.*;
 @ApplicationScoped
 public class LocalArtifactStorage implements ArtifactStorage {
- @Inject @ConfigProperty(name="wayang.console.artifacts.root",defaultValue="./data/artifacts") String configuredRoot;
+ @Inject @ConfigProperty(name="wayang.console.artifacts.root",defaultValue="./data/artifacts") public String configuredRoot;
  public StoredObject put(UUID org,UUID env,String expected,InputStream body,long max) throws IOException {
   Path root=Path.of(configuredRoot).toAbsolutePath().normalize();
   Path dir=root.resolve(org.toString()).resolve(env.toString()).normalize();
