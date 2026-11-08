@@ -30,7 +30,7 @@ A command is scoped to the runtime that enrolled with the Console. A runtime can
 
 ## Current boundary
 
-The command carries deployment identity, workflow/version, and artifact/manifest digests. This milestone establishes durable delivery and acknowledgement, not artifact hosting, artifact transfer, runtime-side signature verification, or automatic compatibility evaluation. Those remain follow-up work. The runtime must verify artifact and manifest digests against its trusted package source before reporting success.
+The command carries deployment identity, workflow/version, and artifact/manifest digests. This milestone establishes durable delivery and acknowledgement. Artifact hosting, transfer, and runtime-side signature verification are handled by the artifact registry and runtime verification contract; compatibility evaluation is now enforced before dispatch. The runtime must verify artifact and manifest digests against its trusted package source before reporting success.
 
 ## Verified deployment completion (M1.9)
 
