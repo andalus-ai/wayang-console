@@ -317,6 +317,33 @@ databaseChangeLog:
         - dropColumn: { tableName: wc_deployment, columnName: minimum_runtime_version }
 
   - changeSet:
+      id: 010-deployment-desired-observed-state
+      author: andalus-ai
+      changes:
+        - createTable:
+            tableName: wc_deployment_reconciliation
+            columns:
+              - column: { name: id, type: UUID, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: deployment_id, type: UUID, constraints: { nullable: false, unique: true } }
+              - column: { name: desired_state, type: VARCHAR(24), constraints: { nullable: false } }
+              - column: { name: generation, type: BIGINT, defaultValueNumeric: 1, constraints: { nullable: false } }
+              - column: { name: observed_state, type: VARCHAR(24), defaultValue: UNKNOWN, constraints: { nullable: false } }
+              - column: { name: observed_artifact_digest, type: VARCHAR(71) }
+              - column: { name: observed_command_id, type: UUID }
+              - column: { name: report_sequence, type: BIGINT, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: observed_at, type: TIMESTAMP WITH TIME ZONE }
+              - column: { name: received_at, type: TIMESTAMP WITH TIME ZONE }
+              - column: { name: reconciliation_state, type: VARCHAR(32), constraints: { nullable: false } }
+              - column: { name: diagnostic, type: VARCHAR(1000) }
+              - column: { name: updated_at, type: TIMESTAMP WITH TIME ZONE, constraints: { nullable: false } }
+        - createIndex:
+            tableName: wc_deployment_reconciliation
+            indexName: idx_wc_reconciliation_state
+            columns:
+              - column: { name: reconciliation_state }
+              - column: { name: updated_at }
+      rollback:
+        - dropTable: { tableName: wc_deployment_reconciliation }
       id: 010-versioned-plugin-catalog
       author: andalus-ai
       changes:
