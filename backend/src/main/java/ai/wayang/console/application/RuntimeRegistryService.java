@@ -133,9 +133,10 @@ public class RuntimeRegistryService {
     }
 
     public static String digest(String raw) {
+        String credential = required(raw, "credential");
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(required(raw, "credential").getBytes(StandardCharsets.UTF_8)));
+                    .digest(credential.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) {
             throw new IllegalStateException("SHA-256 is unavailable", e);
         }

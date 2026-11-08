@@ -3,6 +3,7 @@ package ai.wayang.console.security;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.RequestScoped;
 import jakarta.inject.Inject;
+import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.NotAuthorizedException;
 import org.eclipse.microprofile.jwt.JsonWebToken;
@@ -16,16 +17,17 @@ import java.util.stream.Collectors;
 @RequestScoped
 public class OidcConsoleOperatorIdentityProvider implements ConsoleOperatorIdentityProvider {
     private final SecurityIdentity identity;
-    private final JsonWebToken jwt;
+    private final Instance<JsonWebToken> jwtProvider;
 
     @Inject
-    public OidcConsoleOperatorIdentityProvider(SecurityIdentity identity, JsonWebToken jwt) {
+    public OidcConsoleOperatorIdentityProvider(SecurityIdentity identity, Instance<JsonWebToken> jwtProvider) {
         this.identity = identity;
-        this.jwt = jwt;
+        this.jwtProvider = jwtProvider;
     }
 
     @Override
     public ConsoleOperatorPrincipal current() {
+        JsonWebToken jwt = jwtProvider != null && jwtProvider.isResolvable() ? jwtProvider.get() : null;
         if (identity == null || identity.isAnonymous() || jwt == null
                 || jwt.getSubject() == null || jwt.getSubject().isBlank()) {
             throw new NotAuthorizedException("Bearer access token required");

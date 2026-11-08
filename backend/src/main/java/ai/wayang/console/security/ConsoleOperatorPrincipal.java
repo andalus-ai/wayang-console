@@ -23,9 +23,12 @@ public record ConsoleOperatorPrincipal(
         Objects.requireNonNull(organizationId, "organizationId must not be null");
         Objects.requireNonNull(environmentIds, "environmentIds must not be null");
         Objects.requireNonNull(roles, "roles must not be null");
+        if (environmentIds.stream().anyMatch(Objects::isNull) || roles.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("scope and role values must not contain null");
+        }
         environmentIds = Set.copyOf(environmentIds);
         roles = Set.copyOf(roles);
-        if (environmentIds.isEmpty() || environmentIds.contains(null)) {
+        if (environmentIds.isEmpty()) {
             throw new IllegalArgumentException("at least one valid environment scope is required");
         }
     }
