@@ -47,6 +47,7 @@ public class PluginCatalogGovernanceService {
         String reason = normalizeReason(command.reason());
         PluginCatalogEntryEntity entry = findEntry(organizationId, environmentId, pluginId, version);
         if (entry == null) throw new NotFoundException("Plugin catalog entry not found");
+        entry = entityManager.find(PluginCatalogEntryEntity.class, entry.id, LockModeType.PESSIMISTIC_WRITE);
 
         PluginCatalogGovernanceEntity state = findState(entry.id);
         if (state == null) {
