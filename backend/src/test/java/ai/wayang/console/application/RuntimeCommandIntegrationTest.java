@@ -17,6 +17,8 @@ class RuntimeCommandIntegrationTest {
     @Inject RuntimeRegistryService registry;
     @Inject DeploymentLifecycleService deployments;
     @Inject RuntimeCommandService commands;
+    @Inject RuntimeInventoryService inventory;
+    @Inject RuntimeCompatibilityEvaluator compatibility;
 
     @Test
     @TestTransaction
@@ -27,8 +29,13 @@ class RuntimeCommandIntegrationTest {
         var enrolled = registry.enroll(enrollment.token(), "command-runtime-" + UUID.randomUUID(), "1.0.0", null, null, null);
         UUID runtimeId = UUID.fromString(enrolled.registrationId());
         String digest = "sha256:" + "a".repeat(64);
+        inventory.replaceInventory(runtimeId,
+                java.util.List.of(new RuntimeInventoryService.CapabilityInput("wayang.runtime", "1.2.0", "workflow.execute")),
+                java.util.List.of());
         var deployment = deployments.create(organization, Set.of(environment), runtimeId, "release-1",
-                "sample.workflow", "1.0.0", digest, digest, "operator-test");
+                "sample.workflow", "1.0.0", digest, digest,
+                java.util.List.of(new DeploymentLifecycleService.CapabilityRequirement("wayang.runtime", "workflow.execute", "1.1.0")),
+                "operator-test");
         deployments.transition(organization, Set.of(environment), deployment.id(), "VALIDATING", null, "operator-test");
         deployments.transition(organization, Set.of(environment), deployment.id(), "READY", null, "operator-test");
 
@@ -71,6 +78,7 @@ class RuntimeCommandIntegrationTest {
         var enrolledB = registry.enroll(enrollmentB.token(), "command-other-" + UUID.randomUUID(), "1.0.0", null, null, null);
         UUID runtimeA = UUID.fromString(enrolledA.registrationId());
         String digest = "sha256:" + "b".repeat(64);
+        inventory.replaceInventory(runtimeA, java.util.List.of(), java.util.List.of());
         var deployment = deployments.create(organization, Set.of(environment), runtimeA, "release-2",
                 "sample.workflow", "1.0.0", digest, digest, "operator-test");
         deployments.transition(organization, Set.of(environment), deployment.id(), "VALIDATING", null, "operator-test");
