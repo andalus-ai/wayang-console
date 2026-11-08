@@ -27,7 +27,7 @@ public class DeploymentReconciliationService {
     @Transactional
     public ReconciliationView setDesired(UUID organizationId, Set<UUID> environments,
             UUID deploymentId, String desiredState, String actor) {
-        DeploymentEntity deployment = scoped(deploymentId, organizationId, environments);
+        DeploymentEntity deployment = scopedForUpdate(deploymentId, organizationId, environments);
         String desired = normalize(desiredState, "PRESENT", "ABSENT", "ROLLBACK");
         DeploymentReconciliationEntity row = DeploymentReconciliationEntity
                 .<DeploymentReconciliationEntity>find("deploymentId", deploymentId)
@@ -53,7 +53,7 @@ public class DeploymentReconciliationService {
     public ReconciliationView report(RuntimeRegistryService.AuthenticatedRuntime runtime,
             UUID deploymentId, Observation observation) {
         if (observation == null) throw new IllegalArgumentException("Observation is required");
-        DeploymentEntity deployment = DeploymentEntity.findById(deploymentId);
+        DeploymentEntity deployment = DeploymentEntity.findById(deploymentId, LockModeType.PESSIMISTIC_WRITE);
         if (deployment == null || !runtime.id().equals(deployment.runtimeId)
                 || !runtime.organizationId().equals(deployment.organizationId)
                 || !runtime.environmentId().equals(deployment.environmentId))
@@ -114,7 +114,7 @@ public class DeploymentReconciliationService {
         if ("ABSENT".equals(desired) && "ABSENT".equals(observed)) return "IN_SYNC";
         if ("PRESENT".equals(desired) && "RUNNING".equals(observed))
             return expectedDigest != null && expectedDigest.equalsIgnoreCase(actualDigest) ? "IN_SYNC" : "DRIFTED";
-        if ("ROLLBACK".equals(desired) && ("ABSENT".equals(observed) || "RUNNING".equals(observed))) return "IN_SYNC";
+        if ("ROLLBACK".equals(desired)) return "WAITING_RUNTIME";
         if ("UNKNOWN".equals(observed) || "PENDING".equals(observed) || "APPLYING".equals(observed) || "ROLLING_BACK".equals(observed))
             return "WAITING_RUNTIME";
         return "DRIFTED";
