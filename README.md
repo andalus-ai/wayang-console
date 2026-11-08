@@ -62,3 +62,8 @@ Backend requirements and commands are documented in [backend/README.md](backend/
 
 - Adds durable, idempotent deployment command dispatch, runtime polling leases, authenticated acknowledgements, and deployment status reconciliation.
 - Delivery is at-least-once; runtime consumers must deduplicate commands by stable command ID/idempotency key. Artifact transfer and signature verification remain separate follow-up work.
+
+
+## Shared contracts
+
+The shared contract foundation for Wayang and Console is maintained in [Wayang Core](https://github.com/andalus-ai/wayang-core). Console remains responsible for fleet/control-plane behavior and its persistence/application services; it does not include Wayang's workflow execution libraries. See [shared Core integration](docs/architecture/shared-core-integration.md).
