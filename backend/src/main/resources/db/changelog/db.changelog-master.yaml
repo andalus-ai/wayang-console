@@ -295,6 +295,10 @@ databaseChangeLog:
       id: 009-deployment-capability-requirements
       author: andalus-ai
       changes:
+        - addColumn:
+            tableName: wc_deployment
+            columns:
+              - column: { name: minimum_runtime_version, type: VARCHAR(80) }
         - createTable:
             tableName: wc_deployment_capability_requirement
             columns:
@@ -310,3 +314,4 @@ databaseChangeLog:
               - column: { name: deployment_id }
       rollback:
         - dropTable: { tableName: wc_deployment_capability_requirement }
+        - dropColumn: { tableName: wc_deployment, columnName: minimum_runtime_version }
