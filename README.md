@@ -67,3 +67,8 @@ Backend requirements and commands are documented in [backend/README.md](backend/
 ## Shared contracts
 
 The shared contract foundation for Wayang and Console is maintained in [Wayang Core](https://github.com/andalus-ai/wayang-core). Console remains responsible for fleet/control-plane behavior and its persistence/application services; it does not include Wayang's workflow execution libraries. See [shared Core integration](docs/architecture/shared-core-integration.md).
+### M1.8 artifact supply chain
+
+- Adds scoped artifact registration, streaming SHA-256 verification, Ed25519 signature validation, runtime-authenticated downloads, and a pluggable storage port with a local filesystem adapter.
+- Production deployment creation requires the requested artifact and manifest to be registered and verified. Configure the trusted public key and identifier through `WAYANG_CONSOLE_ARTIFACT_SIGNING_PUBLIC_KEY` and `WAYANG_CONSOLE_ARTIFACT_SIGNING_KEY_ID`.
+- See [artifact supply chain](docs/deployment/artifact-supply-chain.md).
