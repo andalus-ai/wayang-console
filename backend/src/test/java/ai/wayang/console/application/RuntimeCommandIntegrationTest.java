@@ -7,6 +7,8 @@ import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 import java.time.Duration;
+import java.time.Instant;
+import ai.wayang.console.adapter.persistence.RuntimeInstanceEntity;
 import java.util.Set;
 import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
@@ -80,7 +82,7 @@ class RuntimeCommandIntegrationTest {
                 java.util.List.of());
         String digest = "sha256:" + "c".repeat(64);
         var deployment = deployments.create(organization, Set.of(environment), runtimeId, "release-compat",
-                "sample.workflow", "1.0.0", digest, digest,
+                "sample.workflow", "1.0.0", digest, digest, "1.1.0",
                 java.util.List.of(new DeploymentLifecycleService.CapabilityRequirement(
                         "wayang.connector.kafka", "messaging.kafka", "2.0.0")), "operator-test");
         deployments.transition(organization, Set.of(environment), deployment.id(), "VALIDATING", null, "operator-test");
@@ -89,10 +91,36 @@ class RuntimeCommandIntegrationTest {
         var evaluation = compatibility.evaluate(deployment.id(), organization, Set.of(environment));
         assertFalse(evaluation.compatible());
         assertTrue(evaluation.diagnostics().stream().anyMatch(d -> "CAPABILITY_MISSING".equals(d.code())));
+        assertTrue(evaluation.diagnostics().stream().anyMatch(d -> "RUNTIME_VERSION_UNSUPPORTED".equals(d.code())));
         assertThrows(jakarta.ws.rs.WebApplicationException.class,
                 () -> commands.dispatch(organization, Set.of(environment), deployment.id(), "operator-test"));
         assertEquals("READY", deployments.list(organization, Set.of(environment), 0, 10)
                 .items().getFirst().status());
+    }
+
+    @Test
+    @TestTransaction
+    void dispatchRejectsStaleInventoryEvenWhenRuntimeLeaseIsLive() {
+        UUID organization = UUID.randomUUID();
+        UUID environment = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(organization, environment, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "stale-runtime-" + UUID.randomUUID(), "1.0.0", null, null, null);
+        UUID runtimeId = UUID.fromString(enrolled.registrationId());
+        inventory.replaceInventory(runtimeId, java.util.List.of(), java.util.List.of());
+        RuntimeInstanceEntity runtime = RuntimeInstanceEntity.findById(runtimeId);
+        runtime.inventoryReportedAt = Instant.now().minus(Duration.ofMinutes(6));
+        runtime.leaseExpiresAt = Instant.now().plus(Duration.ofMinutes(1));
+        String digest = "sha256:" + "d".repeat(64);
+        var deployment = deployments.create(organization, Set.of(environment), runtimeId, "release-stale",
+                "sample.workflow", "1.0.0", digest, digest, "operator-test");
+        deployments.transition(organization, Set.of(environment), deployment.id(), "VALIDATING", null, "operator-test");
+        deployments.transition(organization, Set.of(environment), deployment.id(), "READY", null, "operator-test");
+
+        var evaluation = compatibility.evaluate(deployment.id(), organization, Set.of(environment));
+        assertFalse(evaluation.compatible());
+        assertTrue(evaluation.diagnostics().stream().anyMatch(d -> "INVENTORY_STALE".equals(d.code())));
+        assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> commands.dispatch(organization, Set.of(environment), deployment.id(), "operator-test"));
     }
 
     @Test
