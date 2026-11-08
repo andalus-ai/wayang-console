@@ -202,16 +202,22 @@ public class RuntimeCommandService {
     }
 
     private static String payload(DeploymentEntity d) {
+        List<DeploymentCapabilityRequirementEntity> requirements =
+                DeploymentCapabilityRequirementEntity.list("deploymentId", d.id);
+        String requirementsJson = requirements.stream()
+                .map(requirement -> "{\"componentId\":\"" + escape(requirement.componentId)
+                        + "\",\"capability\":\"" + escape(requirement.capability)
+                        + "\",\"minimumVersion\":" + (requirement.minimumVersion == null
+                                ? "null" : "\"" + escape(requirement.minimumVersion) + "\"") + "}")
+                .collect(java.util.stream.Collectors.joining(","));
         return "{\"deploymentRecordId\":\"" + d.id + "\",\"deploymentId\":\"" + escape(d.deploymentId)
                 + "\",\"workflowId\":\"" + escape(d.workflowId) + "\",\"workflowVersion\":\""
                 + escape(d.workflowVersion) + "\",\"artifactDigest\":\"" + escape(d.artifactDigest)
-                + "\",\"manifestDigest\":\"" + escape(d.manifestDigest) + "\",\"artifactUri\":\"/api/v1/runtime/artifacts/" + escape(d.artifactDigest)
-                + "\",\"minimumRuntimeVersion\":" + (d.minimumRuntimeVersion == null ? "null" : "\"" + escape(d.minimumRuntimeVersion) + "\"")
-                + ",\"requiredCapabilities\":[" + DeploymentCapabilityRequirementEntity.list("deploymentId", d.id)
-                    .stream().map(requirement -> "{\"componentId\":\"" + escape(requirement.componentId)
-                            + "\",\"capability\":\"" + escape(requirement.capability)
-                            + "\",\"minimumVersion\":" + (requirement.minimumVersion == null ? "null" : "\"" + escape(requirement.minimumVersion) + "\"") + "}")
-                    .collect(java.util.stream.Collectors.joining(",")) + "]}";
+                + "\",\"manifestDigest\":\"" + escape(d.manifestDigest)
+                + "\",\"artifactUri\":\"/api/v1/runtime/artifacts/" + escape(d.artifactDigest)
+                + "\",\"minimumRuntimeVersion\":" + (d.minimumRuntimeVersion == null
+                        ? "null" : "\"" + escape(d.minimumRuntimeVersion) + "\"")
+                + ",\"requiredCapabilities\":[" + requirementsJson + "]}";
     }
     private static String escape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"")
