@@ -51,7 +51,7 @@ class RuntimeCommandIntegrationTest {
 
         var command = commands.dispatch(organization, Set.of(environment), deployment.id(), "operator-test");
         assertTrue(command.idempotencyKey().contains(":generation:2:"));
-        assertTrue(command.typedPayload().contains("\\\"generation\\\":2"));
+        assertTrue(command.typedPayload().contains("\\"generation\\":2"));
         assertThrows(jakarta.ws.rs.WebApplicationException.class, () -> deployments.transition(
                 organization, Set.of(environment), deployment.id(), "DEPLOYED", null, "operator-test"));
         var repeated = commands.dispatch(organization, Set.of(environment), deployment.id(), "operator-test");
