@@ -25,6 +25,19 @@ class ConsoleOperatorPrincipalTest {
     }
 
     @Test
+    void publisherTrustAdminIncludesReadButReadDoesNotGrantAdmin() {
+        var admin = new ConsoleOperatorPrincipal("operator-1", UUID.randomUUID(),
+                Set.of(UUID.randomUUID()), Set.of("console:publisher-trust:admin"));
+        assertTrue(admin.canReadPublisherTrust());
+        assertTrue(admin.canAdminPublisherTrust());
+
+        var reader = new ConsoleOperatorPrincipal("operator-2", UUID.randomUUID(),
+                Set.of(UUID.randomUUID()), Set.of("console:publisher-trust:read"));
+        assertTrue(reader.canReadPublisherTrust());
+        assertFalse(reader.canAdminPublisherTrust());
+    }
+
+    @Test
     void emptyEnvironmentScopeIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> new ConsoleOperatorPrincipal(
                 "operator-1", UUID.randomUUID(), Set.of(), Set.of("console:runtime:read")));
