@@ -4,25 +4,52 @@ import ai.wayang.console.adapter.persistence.*;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.transaction.Transactional;
 import java.time.Instant;
+import java.time.Duration;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Set;
+import jakarta.ws.rs.NotFoundException;
 import java.util.List;
 import java.util.UUID;
 
 @ApplicationScoped
 public class RuntimeInventoryService {
+    private static final Duration RUNTIME_LEASE = Duration.ofMinutes(2);
+    private static final int MAX_ITEMS = 1000;
     public record CapabilityInput(String componentId, String version, String capability) {}
     public record WorkflowInput(String workflowId, String workflowVersion, String definitionDigest, String deploymentId) {}
-    public record InventoryResult(String revision, int capabilityCount, int workflowCount) {}
+    public record InventoryResult(String revision, int capabilityCount, int workflowCount, Instant reportedAt) {}
 
     @Transactional
     public InventoryResult replaceInventory(UUID runtimeId, List<CapabilityInput> capabilities,
                                             List<WorkflowInput> workflows) {
         RuntimeInstanceEntity runtime = RuntimeInstanceEntity.findById(runtimeId);
-        if (runtime == null) throw new IllegalArgumentException("Runtime not found");
+        if (runtime == null || "REVOKED".equals(runtime.status)) throw new NotFoundException("Runtime not found");
 
         List<CapabilityInput> safeCapabilities = capabilities == null ? List.of() : new java.util.ArrayList<>(capabilities);
         List<WorkflowInput> safeWorkflows = workflows == null ? List.of() : new java.util.ArrayList<>(workflows);
-        if (safeCapabilities.size() > 1000 || safeWorkflows.size() > 1000)
+        if (safeCapabilities.size() > MAX_ITEMS || safeWorkflows.size() > MAX_ITEMS)
             throw new IllegalArgumentException("Inventory report exceeds the 1000-item limit per collection");
+
+        Set<String> capabilityKeys = new HashSet<>();
+        for (CapabilityInput input : safeCapabilities) {
+            require(input != null, "Capability entries must not be null");
+            String component = bounded(input.componentId(), 180, "componentId");
+            String version = bounded(input.version(), 80, "version");
+            String capability = bounded(input.capability(), 180, "capability");
+            require(capabilityKeys.add((component + "\\u0000" + version + "\\u0000" + capability).toLowerCase(Locale.ROOT)),
+                    "Inventory contains duplicate capabilities");
+        }
+        Set<String> workflowKeys = new HashSet<>();
+        for (WorkflowInput input : safeWorkflows) {
+            require(input != null, "Workflow entries must not be null");
+            String id = bounded(input.workflowId(), 180, "workflowId");
+            bounded(input.workflowVersion(), 80, "workflowVersion");
+            String digest = bounded(input.definitionDigest(), 128, "definitionDigest");
+            bounded(input.deploymentId(), 160, "deploymentId");
+            require(digest.matches("(?i)sha256:[0-9a-f]{64}"), "definitionDigest must be sha256:<64 hex chars>");
+            require(workflowKeys.add(id.toLowerCase(Locale.ROOT)), "Inventory contains duplicate workflow ids");
+        }
 
         for (CapabilityInput input : safeCapabilities)
             require(input != null && text(input.componentId()) && text(input.version()) && text(input.capability()),
@@ -54,6 +81,14 @@ public class RuntimeInventoryService {
             entity.persist();
         }
 
+        Instant now = Instant.now();
+        String revision = UUID.randomUUID().toString();
+        runtime.inventoryRevision = revision;
+        runtime.inventoryReportedAt = now;
+        runtime.lastSeenAt = now;
+        runtime.leaseExpiresAt = now.plus(RUNTIME_LEASE);
+        runtime.status = "ONLINE";
+
         AuditRecordEntity audit = new AuditRecordEntity();
         audit.id = UUID.randomUUID();
         audit.organizationId = runtime.organizationId;
@@ -62,14 +97,19 @@ public class RuntimeInventoryService {
         audit.action = "RUNTIME_INVENTORY_REPORTED";
         audit.resourceType = "RUNTIME";
         audit.resourceId = runtime.id.toString();
-        audit.occurredAt = Instant.now();
+        audit.occurredAt = now;
         audit.outcome = "SUCCESS";
         audit.persist();
 
-        return new InventoryResult(UUID.randomUUID().toString(), safeCapabilities.size(), safeWorkflows.size());
+        return new InventoryResult(revision, safeCapabilities.size(), safeWorkflows.size(), now);
     }
 
-    private static boolean text(String value) { return value != null && !value.isBlank(); }
+    private static String bounded(String value, int max, String name) {
+        require(value != null && !value.isBlank(), name + " is required");
+        String normalized = value.trim();
+        require(normalized.length() <= max, name + " exceeds " + max + " characters");
+        return normalized;
+    }
     private static void require(boolean valid, String message) {
         if (!valid) throw new IllegalArgumentException(message);
     }
