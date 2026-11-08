@@ -47,6 +47,11 @@ class RuntimeCommandIntegrationTest {
 
         var started = commands.acknowledge(runtime, command.commandId(), "STARTED", "accepted");
         assertEquals("RUNNING", started.status());
+        assertThrows(jakarta.ws.rs.WebApplicationException.class, () ->
+                commands.acknowledge(runtime, command.commandId(), "SUCCEEDED", "missing evidence", null));
+        assertThrows(jakarta.ws.rs.WebApplicationException.class, () ->
+                commands.acknowledge(runtime, command.commandId(), "SUCCEEDED", "wrong evidence",
+                        "sha256:" + "f".repeat(64)));
         var completed = commands.acknowledge(runtime, command.commandId(), "SUCCEEDED", "applied", digest);
         assertTrue(completed.accepted());
         assertEquals("SUCCEEDED", completed.status());
