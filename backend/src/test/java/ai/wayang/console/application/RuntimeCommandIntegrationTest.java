@@ -45,7 +45,7 @@ class RuntimeCommandIntegrationTest {
         assertEquals(command.commandId(), polled.commands().getFirst().commandId());
         assertEquals(1, polled.commands().getFirst().attemptCount());
 
-        var started = commands.acknowledge(runtime, command.commandId(), "STARTED", "accepted");
+        var started = commands.acknowledge(runtime, command.commandId(), "STARTED", "accepted", null);
         assertEquals("RUNNING", started.status());
         assertThrows(jakarta.ws.rs.WebApplicationException.class, () ->
                 commands.acknowledge(runtime, command.commandId(), "SUCCEEDED", "missing evidence", null));
