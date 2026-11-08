@@ -3,6 +3,9 @@ package ai.wayang.console.application;
 import ai.wayang.console.adapter.persistence.ArtifactEntity;
 import ai.wayang.console.adapter.persistence.PluginCatalogEntryEntity;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.TreeSet;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -107,6 +110,8 @@ public class PluginCatalogService {
             throw new WebApplicationException("manifestDigest must be sha256:<64 hex>", 400);
         if (command.metadata() == null || !command.metadata().isObject())
             throw new WebApplicationException("metadata must be a JSON object", 400);
+        if (!"1.0".equals(command.metadata().path("catalog_schema_version").asText()))
+            throw new WebApplicationException("catalog_schema_version must be 1.0", 400);
         if (!command.pluginId().equals(command.metadata().path("plugin_id").asText())
                 || !command.pluginVersion().equals(command.metadata().path("plugin_version").asText())
                 || !command.manifestDigest().equalsIgnoreCase(command.metadata().path("manifest_digest").asText()))
@@ -117,8 +122,24 @@ public class PluginCatalogService {
     }
 
     private String canonical(JsonNode metadata) {
-        try { return mapper.writeValueAsString(metadata); }
+        try { return mapper.writeValueAsString(sortRecursively(metadata)); }
         catch (Exception e) { throw new WebApplicationException("Metadata is not valid JSON", 400); }
+    }
+
+    private JsonNode sortRecursively(JsonNode value) {
+        if (value.isObject()) {
+            ObjectNode sorted = mapper.createObjectNode();
+            TreeSet<String> names = new TreeSet<>();
+            value.fieldNames().forEachRemaining(names::add);
+            names.forEach(name -> sorted.set(name, sortRecursively(value.get(name))));
+            return sorted;
+        }
+        if (value.isArray()) {
+            ArrayNode array = mapper.createArrayNode();
+            value.forEach(item -> array.add(sortRecursively(item)));
+            return array;
+        }
+        return value.deepCopy();
     }
 
     private static String sha256(String value) {
