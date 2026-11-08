@@ -32,9 +32,9 @@ The initial `catalog_schema_version` is `1.0`. Consumers must reject unsupported
 - Console artifact intake independently verifies artifact digest and configured signature evidence. The catalog's `manifest_digest` may correlate the manifest to the artifact record; artifact digest, signature, signing-key identity, storage location and upload state remain in the artifact registry.
 - Runtime independently verifies package bytes and manifest before applying a deployment.
 
-## Lifecycle states are not catalog fields
+## Governance lifecycle is separate from publisher metadata
 
-Approval, deprecation, revocation, rollout, deployment, installation and health are mutable Console/runtime state. They must not be written into the immutable publisher metadata projection. A later Console API can expose these as a separate governance/status resource keyed by plugin ID and version.
+Approval, deprecation, revocation, rollout, deployment, installation and health are mutable Console/runtime state. They are not written into the immutable publisher metadata projection. Console stores governance in separate current-state and append-only event tables keyed to the immutable catalog entry.
 
 Likewise, per-runtime installed plugin versions belong to runtime inventory, not this catalog. A runtime inventory report must never overwrite publisher metadata.
 
@@ -51,13 +51,15 @@ Likewise, per-runtime installed plugin versions belong to runtime inventory, not
 
 ## Initial API boundary
 
-The first implementation milestone is a contract only. A subsequent Console backend change should add an organization/environment-scoped, operator-admin write API and read API for catalog metadata, with immutable plugin-version records and idempotent upsert semantics. It must not overload `RuntimeInventoryService` or `ArtifactRegistryService`.
+The contract, immutable metadata persistence, and initial operator-scoped catalog API are implemented in the catalog backend milestone. The backend keeps metadata separate from `RuntimeInventoryService` and `ArtifactRegistryService`.
 
 Implemented initial resource shape:
 
 - `PUT /api/v1/console/plugin-catalog/{pluginId}/versions/{version}` — publish/update validated metadata for an immutable version; repeated identical content is idempotent, conflicting content requires a new version.
 - `GET /api/v1/console/plugin-catalog` — list catalog entries in the caller's authorized scope.
 - `GET /api/v1/console/plugin-catalog/{pluginId}/versions/{version}` — fetch one immutable entry.
-- `POST /api/v1/console/plugin-catalog/{pluginId}/versions/{version}:deprecate` — governance state transition, stored separately from publisher metadata.
+- `GET /api/v1/console/plugin-catalog/{pluginId}/versions/{version}/governance` — current lifecycle status.
+- `POST /api/v1/console/plugin-catalog/{pluginId}/versions/{version}/governance` — transition with an explicit action and reason.
+- `GET /api/v1/console/plugin-catalog/{pluginId}/versions/{version}/governance/history` — append-only transition history.
 
-The write path must bind the entry's manifest digest to a registered artifact before marking it distributable. Catalog publication alone must not create a deployment or runtime command.
+Governance actions are `DEPRECATE`, `REACTIVATE` and `REVOKE`. The allowed transitions are ACTIVE → DEPRECATED → ACTIVE, and ACTIVE or DEPRECATED → REVOKED. REVOKED is terminal. Every transition requires a reason, records the actor and timestamp, writes an append-only event, and appends to the Console audit chain. State changes are serialized on the catalog entry to avoid concurrent first-transition races. Governance does not mutate publisher metadata, install or uninstall a plugin, or dispatch runtime commands. Artifact registration remains a separate supply-chain fact.
