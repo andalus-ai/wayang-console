@@ -1,6 +1,7 @@
 package ai.wayang.console.application;
 
 import ai.wayang.console.adapter.persistence.DeploymentEntity;
+import ai.wayang.console.adapter.persistence.DeploymentCapabilityRequirementEntity;
 import ai.wayang.console.adapter.persistence.RuntimeInstanceEntity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -10,6 +11,7 @@ import jakarta.ws.rs.NotFoundException;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import java.time.Instant;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 
@@ -23,11 +25,20 @@ public class DeploymentLifecycleService {
             String workflowVersion, String artifactDigest, String manifestDigest, String status,
             Instant createdAt, Instant updatedAt, Instant completedAt, String failureReason) {}
     public record DeploymentPage(List<DeploymentView> items, long total, int page, int size) {}
+    public record CapabilityRequirement(String componentId, String capability, String minimumVersion) {}
 
     @Transactional
     public DeploymentView create(UUID organizationId, Set<UUID> environments, UUID runtimeId,
             String deploymentId, String workflowId, String workflowVersion, String artifactDigest,
             String manifestDigest, String actor) {
+        return create(organizationId, environments, runtimeId, deploymentId, workflowId, workflowVersion,
+                artifactDigest, manifestDigest, List.of(), actor);
+    }
+
+    @Transactional
+    public DeploymentView create(UUID organizationId, Set<UUID> environments, UUID runtimeId,
+            String deploymentId, String workflowId, String workflowVersion, String artifactDigest,
+            String manifestDigest, List<CapabilityRequirement> requirements, String actor) {
         RuntimeInstanceEntity runtime = RuntimeInstanceEntity.findById(runtimeId, LockModeType.PESSIMISTIC_READ);
         if (runtime == null || !organizationId.equals(runtime.organizationId)
                 || environments == null || !environments.contains(runtime.environmentId))
@@ -38,6 +49,20 @@ public class DeploymentLifecycleService {
         digest(artifactDigest, "artifactDigest");
         digest(manifestDigest, "manifestDigest");
         if (requireRegisteredArtifact) artifacts.assertRegistered(organizationId, runtime.environmentId, artifactDigest, manifestDigest);
+        List<CapabilityRequirement> safeRequirements = requirements == null ? List.of() : List.copyOf(requirements);
+        if (safeRequirements.size() > 100) throw new IllegalArgumentException("At most 100 runtime capability requirements are allowed");
+        Set<String> requirementKeys = new HashSet<>();
+        for (CapabilityRequirement requirement : safeRequirements) {
+            if (requirement == null) throw new IllegalArgumentException("Capability requirement entries must not be null");
+            String component = requiredBounded(requirement.componentId(), 180, "componentId");
+            String capability = requiredBounded(requirement.capability(), 180, "capability");
+            String minimum = requirement.minimumVersion() == null || requirement.minimumVersion().isBlank()
+                    ? null : requiredBounded(requirement.minimumVersion(), 80, "minimumVersion");
+            if (minimum != null && !minimum.matches("(?i)v?[0-9]+(?:\\.[0-9]+)*"))
+                throw new IllegalArgumentException("minimumVersion must be a numeric dotted version");
+            if (!requirementKeys.add(component.toLowerCase() + "|" + capability.toLowerCase()))
+                throw new IllegalArgumentException("Duplicate capability requirement");
+        }
         if (DeploymentEntity.find("organizationId = ?1 and environmentId = ?2 and deploymentId = ?3",
                 organizationId, runtime.environmentId, deploymentId).firstResult() != null)
             throw new jakarta.ws.rs.WebApplicationException("Deployment id already exists in this scope", 409);
@@ -48,6 +73,14 @@ public class DeploymentLifecycleService {
         d.workflowVersion = workflowVersion.trim(); d.artifactDigest = artifactDigest.toLowerCase();
         d.manifestDigest = manifestDigest.toLowerCase(); d.status = "REQUESTED"; d.requestedBy = required(actor, "actor");
         d.createdAt = now; d.updatedAt = now; d.persist();
+        for (CapabilityRequirement requirement : safeRequirements) {
+            DeploymentCapabilityRequirementEntity entity = new DeploymentCapabilityRequirementEntity();
+            entity.id = UUID.randomUUID(); entity.deploymentId = d.id;
+            entity.componentId = requirement.componentId().trim(); entity.capability = requirement.capability().trim();
+            entity.minimumVersion = requirement.minimumVersion() == null || requirement.minimumVersion().isBlank()
+                    ? null : requirement.minimumVersion().trim();
+            entity.persist();
+        }
         audit.append(organizationId, runtime.environmentId, actor, "DEPLOYMENT_REQUESTED", "DEPLOYMENT", d.id.toString(), now, "SUCCESS");
         return view(d);
     }
@@ -97,6 +130,11 @@ public class DeploymentLifecycleService {
     private static DeploymentView view(DeploymentEntity d) {
         return new DeploymentView(d.id,d.deploymentId,d.runtimeId,d.workflowId,d.workflowVersion,d.artifactDigest,
                 d.manifestDigest,d.status,d.createdAt,d.updatedAt,d.completedAt,d.failureReason);
+    }
+    private static String requiredBounded(String s,int max,String n){
+        String value = required(s,n);
+        if(value.length()>max) throw new IllegalArgumentException(n+" exceeds "+max+" characters");
+        return value;
     }
     private static String required(String s,String n){if(s==null||s.isBlank())throw new IllegalArgumentException(n+" required");return s.trim();}
     private static void digest(String s,String n){if(s==null||!s.matches("(?i)sha256:[0-9a-f]{64}"))throw new IllegalArgumentException(n+" must be sha256:<64 hex chars>");}
