@@ -47,12 +47,12 @@ class RuntimeCommandIntegrationTest {
 
         var started = commands.acknowledge(runtime, command.commandId(), "STARTED", "accepted");
         assertEquals("RUNNING", started.status());
-        var completed = commands.acknowledge(runtime, command.commandId(), "SUCCEEDED", "applied");
+        var completed = commands.acknowledge(runtime, command.commandId(), "SUCCEEDED", "applied", digest);
         assertTrue(completed.accepted());
         assertEquals("SUCCEEDED", completed.status());
         assertEquals("DEPLOYED", deployments.list(organization, Set.of(environment), 0, 10)
                 .items().getFirst().status());
-        assertTrue(commands.acknowledge(runtime, command.commandId(), "SUCCEEDED", "duplicate").accepted());
+        assertTrue(commands.acknowledge(runtime, command.commandId(), "SUCCEEDED", "duplicate", digest).accepted());
     }
 
     @Test
@@ -73,6 +73,6 @@ class RuntimeCommandIntegrationTest {
         var command = commands.dispatch(organization, Set.of(environment), deployment.id(), "operator-test");
         var otherRuntime = registry.authenticate(enrolledB.registrationToken());
         assertThrows(jakarta.ws.rs.NotFoundException.class, () ->
-                commands.acknowledge(otherRuntime, command.commandId(), "SUCCEEDED", "forged"));
+                commands.acknowledge(otherRuntime, command.commandId(), "SUCCEEDED", "forged", digest));
     }
 }
