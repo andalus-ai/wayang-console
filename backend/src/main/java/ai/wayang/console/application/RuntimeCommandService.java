@@ -24,6 +24,7 @@ public class RuntimeCommandService {
     private static final int MAX_ATTEMPTS = 12;
 
     @Inject AuditIntegrityService audit;
+    @Inject RuntimeCompatibilityEvaluator compatibility;
 
     public record CommandView(UUID commandId, String idempotencyKey, String commandType,
             String typedPayload, Instant expiresAt, int attemptCount) {}
@@ -39,6 +40,13 @@ public class RuntimeCommandService {
         if (existing != null) return view(existing);
         if (!"READY".equals(deployment.status))
             throw new WebApplicationException("Only READY deployments can be dispatched", 409);
+        RuntimeCompatibilityEvaluator.Evaluation evaluation = compatibility.evaluate(deployment);
+        if (!evaluation.compatible()) {
+            String diagnostics = evaluation.diagnostics().stream()
+                    .map(diagnostic -> diagnostic.code() + ": " + diagnostic.message())
+                    .collect(java.util.stream.Collectors.joining("; "));
+            throw new WebApplicationException("Runtime is not compatible with this deployment: " + diagnostics, 409);
+        }
 
         Instant now = Instant.now();
         ManagementCommandEntity command = new ManagementCommandEntity();
