@@ -6,6 +6,7 @@ import ai.wayang.console.adapter.persistence.RuntimeCapabilityEntity;
 import ai.wayang.console.adapter.persistence.RuntimeInstanceEntity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.persistence.LockModeType;
+import jakarta.transaction.Transactional;
 import jakarta.ws.rs.NotFoundException;
 import java.time.Duration;
 import java.time.Instant;
@@ -24,6 +25,7 @@ public class RuntimeCompatibilityEvaluator {
     public record Evaluation(boolean compatible, UUID deploymentId, UUID runtimeId,
             String inventoryRevision, Instant inventoryReportedAt, List<Diagnostic> diagnostics) {}
 
+    @Transactional
     public Evaluation evaluate(UUID deploymentId, UUID organizationId, Set<UUID> environments) {
         DeploymentEntity deployment = DeploymentEntity.findById(deploymentId);
         if (deployment == null || !organizationId.equals(deployment.organizationId)
@@ -33,6 +35,7 @@ public class RuntimeCompatibilityEvaluator {
         return evaluate(deployment);
     }
 
+    @Transactional
     public Evaluation evaluate(DeploymentEntity deployment) {
         List<Diagnostic> diagnostics = new ArrayList<>();
         RuntimeInstanceEntity runtime = RuntimeInstanceEntity.findById(deployment.runtimeId, LockModeType.PESSIMISTIC_READ);
