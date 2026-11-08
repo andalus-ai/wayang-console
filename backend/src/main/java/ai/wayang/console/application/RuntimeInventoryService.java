@@ -51,14 +51,6 @@ public class RuntimeInventoryService {
             require(workflowKeys.add(id.toLowerCase(Locale.ROOT)), "Inventory contains duplicate workflow ids");
         }
 
-        for (CapabilityInput input : safeCapabilities)
-            require(input != null && text(input.componentId()) && text(input.version()) && text(input.capability()),
-                    "Each capability requires componentId, version, and capability");
-        for (WorkflowInput input : safeWorkflows)
-            require(input != null && text(input.workflowId()) && text(input.workflowVersion())
-                    && text(input.definitionDigest()) && text(input.deploymentId()),
-                    "Each workflow requires id, version, digest, and deploymentId");
-
         RuntimeCapabilityEntity.delete("runtimeId", runtimeId);
         WorkflowReferenceEntity.delete("runtimeId", runtimeId);
         for (CapabilityInput input : safeCapabilities) {
