@@ -69,6 +69,34 @@ class RuntimeCommandIntegrationTest {
 
     @Test
     @TestTransaction
+    void dispatchRejectsMissingCapabilityAndReportsDiagnostic() {
+        UUID organization = UUID.randomUUID();
+        UUID environment = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(organization, environment, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "compat-runtime-" + UUID.randomUUID(), "1.0.0", null, null, null);
+        UUID runtimeId = UUID.fromString(enrolled.registrationId());
+        inventory.replaceInventory(runtimeId,
+                java.util.List.of(new RuntimeInventoryService.CapabilityInput("wayang.runtime", "1.0.0", "workflow.execute")),
+                java.util.List.of());
+        String digest = "sha256:" + "c".repeat(64);
+        var deployment = deployments.create(organization, Set.of(environment), runtimeId, "release-compat",
+                "sample.workflow", "1.0.0", digest, digest,
+                java.util.List.of(new DeploymentLifecycleService.CapabilityRequirement(
+                        "wayang.connector.kafka", "messaging.kafka", "2.0.0")), "operator-test");
+        deployments.transition(organization, Set.of(environment), deployment.id(), "VALIDATING", null, "operator-test");
+        deployments.transition(organization, Set.of(environment), deployment.id(), "READY", null, "operator-test");
+
+        var evaluation = compatibility.evaluate(deployment.id(), organization, Set.of(environment));
+        assertFalse(evaluation.compatible());
+        assertTrue(evaluation.diagnostics().stream().anyMatch(d -> "CAPABILITY_MISSING".equals(d.code())));
+        assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> commands.dispatch(organization, Set.of(environment), deployment.id(), "operator-test"));
+        assertEquals("READY", deployments.list(organization, Set.of(environment), 0, 10)
+                .items().getFirst().status());
+    }
+
+    @Test
+    @TestTransaction
     void runtimeCannotAcknowledgeAnotherRuntimesCommand() {
         UUID organization = UUID.randomUUID();
         UUID environment = UUID.randomUUID();
