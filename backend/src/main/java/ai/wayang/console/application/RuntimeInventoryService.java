@@ -31,7 +31,7 @@ public class RuntimeInventoryService {
         if (safeCapabilities.size() > MAX_ITEMS || safeWorkflows.size() > MAX_ITEMS)
             throw new IllegalArgumentException("Inventory report exceeds the 1000-item limit per collection");
 
-        Set<String> capabilityKeys = new HashSet<>();
+        Set<List<String>> capabilityKeys = new HashSet<>();
         for (CapabilityInput input : safeCapabilities) {
             require(input != null, "Capability entries must not be null");
             String component = bounded(input.componentId(), 180, "componentId");
