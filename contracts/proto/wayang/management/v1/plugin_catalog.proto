@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package wayang.management.v1;
+
+option java_multiple_files = true;
+option java_package = "ai.wayang.console.contracts.management.v1";
+
+import "google/protobuf/struct.proto";
+
+// Portable, non-executable plugin metadata. This is a catalog projection,
+// not a runtime installation report and not an artifact distribution record.
+message PluginCatalogEntry {
+  // Contract version for this message family. Current value: "1.0".
+  string catalog_schema_version = 1;
+
+  string plugin_id = 2;
+  string plugin_version = 3;
+  string plugin_api_version = 4;
+  string publisher = 5;
+  string runtime_compatibility = 6;
+  string license = 7;
+
+  repeated PluginCatalogComponent components = 8;
+  repeated PluginCatalogDependency dependencies = 9;
+  repeated string permissions = 10;
+
+  // Stable digest of the canonical manifest bytes, when known.
+  // Artifact digest and signature belong to the artifact supply-chain record.
+  string manifest_digest = 11;
+
+  // Namespaced, non-authoritative extension metadata for forward compatibility.
+  map<string, string> annotations = 12;
+}
+
+message PluginCatalogComponent {
+  string component_id = 1;
+  string component_version = 2;
+  string kind = 3;
+  string executor_type = 4;
+  string description = 5;
+  string category = 6;
+  string icon = 7;
+  repeated string required_features = 8;
+  repeated string capabilities = 9;
+  repeated string dependencies = 10;
+  string isolation_level = 11;
+  repeated string execution_modes = 12;
+  string state_model = 13;
+  bool portable_payload = 14;
+  bool supports_cancellation = 15;
+  bool supports_idempotency = 16;
+  string config_schema_json = 17;
+  string ui_hints_json = 18;
+}
+
+message PluginCatalogDependency {
+  string plugin_id = 1;
+  string version_constraint = 2;
+  bool optional = 3;
+}
+
+// Diagnostics describe lossy or unsupported projection details. They do not
+// imply that the plugin is invalid or approved.
+message PluginCatalogDiagnostic {
+  string severity = 1;
+  string field_path = 2;
+  string code = 3;
+  string message = 4;
+}
+
+message PluginCatalogProjection {
+  PluginCatalogEntry entry = 1;
+  repeated PluginCatalogDiagnostic diagnostics = 2;
+}
