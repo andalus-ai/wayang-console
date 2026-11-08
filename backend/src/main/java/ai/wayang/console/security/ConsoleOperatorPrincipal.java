@@ -4,9 +4,16 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
-public record ConsoleOperatorPrincipal(String subject, UUID organizationId, Set<UUID> environmentIds, Set<String> roles) {
+public record ConsoleOperatorPrincipal(
+        String subject,
+        UUID organizationId,
+        Set<UUID> environmentIds,
+        Set<String> roles) {
+
     public ConsoleOperatorPrincipal {
-        if (subject == null || subject.isBlank()) throw new IllegalArgumentException("subject must not be blank");
+        if (subject == null || subject.isBlank()) {
+            throw new IllegalArgumentException("subject must not be blank");
+        }
         Objects.requireNonNull(organizationId, "organizationId must not be null");
         Objects.requireNonNull(environmentIds, "environmentIds must not be null");
         Objects.requireNonNull(roles, "roles must not be null");
@@ -27,6 +34,4 @@ public record ConsoleOperatorPrincipal(String subject, UUID organizationId, Set<
     public boolean canAdminRuntime() {
         return roles.contains("console:runtime:admin");
     }
-    public boolean canReadRuntime() { return roles.contains("console:runtime:read") || canAdminRuntime(); }
-    public boolean canAdminRuntime() { return roles.contains("console:runtime:admin"); }
 }
