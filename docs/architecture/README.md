@@ -28,3 +28,10 @@ Numou is optional. Define ports for identity, tenancy resolution, authorization,
 
 ## Compatibility
 Management APIs and events carry explicit versions. Runtime capability negotiation includes supported protocol versions. Breaking changes require a new major contract or documented compatibility window.
+
+
+## Shared contract source
+
+[Wayang Core](https://github.com/andalus-ai/wayang-core) is the canonical target for contracts shared with Wayang: component/plugin descriptors, portable manifests and schemas, capability vocabulary, and versioned management/worker protocols. Console owns its persistence entities, repositories, application services, REST resources, authorization and UI. It must not import Wayang workflow execution modules.
+
+The current protobuf under contracts/proto remains the compatibility baseline until its source is migrated to Core and both runtime and Console consumers are verified. Do not duplicate or independently evolve it. See [shared Core integration](shared-core-integration.md).
