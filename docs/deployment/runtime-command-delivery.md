@@ -15,7 +15,7 @@ All endpoints require the runtime registration bearer token:
 
 - `POST /api/v1/runtime/commands/poll` with `{"limit":10}` — leases up to 50 commands.
 - `POST /api/v1/runtime/commands/{commandId}/ack` with `{"status":"STARTED","message":"..." }` — acknowledges start and renews the execution lease.
-- The same acknowledgement endpoint accepts `SUCCEEDED` or `FAILED` to complete the command.
+- The same acknowledgement endpoint accepts `SUCCEEDED` or `FAILED` to complete the command. A `SUCCEEDED` request **must** include `verifiedArtifactDigest` in `sha256:<64 lowercase hex>` form.
 
 A command is scoped to the runtime that enrolled with the Console. A runtime cannot poll or acknowledge another runtime's command. Error details are bounded; do not include credentials or secrets.
 
@@ -31,3 +31,19 @@ A command is scoped to the runtime that enrolled with the Console. A runtime can
 ## Current boundary
 
 The command carries deployment identity, workflow/version, and artifact/manifest digests. This milestone establishes durable delivery and acknowledgement, not artifact hosting, artifact transfer, runtime-side signature verification, or automatic compatibility evaluation. Those remain follow-up work. The runtime must verify artifact and manifest digests against its trusted package source before reporting success.
+
+## Verified deployment completion (M1.9)
+
+A runtime must send the digest of the artifact it actually verified and applied:
+
+```json
+{
+  "status": "SUCCEEDED",
+  "message": "Artifact verified and activated",
+  "verifiedArtifactDigest": "sha256:<64-hex-digest>"
+}
+```
+
+The Console compares this value with the deployment's registered artifact digest before completing the command or changing the deployment to `DEPLOYED`. Missing, malformed, or mismatched evidence is rejected with HTTP 409; the command remains in its leased/running state so the runtime can submit a corrected acknowledgement before expiry. The accepted digest is persisted on the command for audit and reconciliation. Failed and STARTED acknowledgements do not require an artifact digest.
+
+This is evidence supplied by the authenticated runtime, not independent remote attestation. The runtime implementation must still verify the artifact bytes and signed manifest locally before reporting success.
