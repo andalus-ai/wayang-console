@@ -30,6 +30,8 @@ public class ConsoleOperatorContext {
     public void requirePublisherTrustAdmin() {
         if (!principal().canAdminPublisherTrust()) throw new ForbiddenException("Publisher trust administration permission is required");
     }
+    public void requirePluginApprovalRead() { if (!principal().canReadPluginApproval()) throw new ForbiddenException("Plugin approval read permission is required"); }
+    public void requirePluginApprovalAdmin() { if (!principal().canAdminPluginApproval()) throw new ForbiddenException("Plugin approval administration permission is required"); }
     public UUID requireEnvironment(String value) {
         if (value == null || value.isBlank()) {
             if (principal().environmentIds().size() == 1) return principal().environmentIds().iterator().next();
