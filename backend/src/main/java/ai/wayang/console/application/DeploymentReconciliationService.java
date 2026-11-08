@@ -97,17 +97,27 @@ public class DeploymentReconciliationService {
 
     @Transactional
     public ReconciliationView get(UUID organizationId, Set<UUID> environments, UUID deploymentId) {
-        scopedForUpdate(deploymentId, organizationId, environments);
+        scoped(deploymentId, organizationId, environments);
         DeploymentReconciliationEntity row = DeploymentReconciliationEntity.find("deploymentId", deploymentId).firstResult();
         if (row == null) throw new NotFoundException("Reconciliation state not found");
         return view(row);
     }
 
+    private static DeploymentEntity scopedForUpdate(UUID id, UUID organizationId, Set<UUID> environments) {
+        DeploymentEntity d = DeploymentEntity.findById(id, LockModeType.PESSIMISTIC_WRITE);
+        verifyScope(d, organizationId, environments);
+        return d;
+    }
+
     private static DeploymentEntity scoped(UUID id, UUID organizationId, Set<UUID> environments) {
         DeploymentEntity d = DeploymentEntity.findById(id);
+        verifyScope(d, organizationId, environments);
+        return d;
+    }
+
+    private static void verifyScope(DeploymentEntity d, UUID organizationId, Set<UUID> environments) {
         if (d == null || !organizationId.equals(d.organizationId) || environments == null || !environments.contains(d.environmentId))
             throw new NotFoundException("Deployment not found");
-        return d;
     }
 
     private static String evaluate(String desired, String observed, String expectedDigest, String actualDigest) {
