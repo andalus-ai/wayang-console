@@ -62,3 +62,4 @@ class ConsoleOperatorPrincipalTest {
                 " ", UUID.randomUUID(), Set.of(UUID.randomUUID()), Set.of()));
     }
 }
+
