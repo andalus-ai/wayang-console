@@ -49,3 +49,13 @@
 6. Repeated registration and heartbeat are idempotent.
 7. Stale instances are distinct from unhealthy instances.
 8. Runtime execution is unaffected by Console outages.
+
+
+## M7 — Shared contract extraction
+- [ ] Add golden fixtures for the current runtime management protobuf and API behavior.
+- [ ] Consume the canonical management contract from released wayang-core artifacts after migration.
+- [ ] Replace duplicated shared component/plugin metadata models with Core contracts where applicable.
+- [ ] Keep Console persistence entities, repositories, application services and operator APIs local.
+- [ ] Add cross-repository compatibility CI with Wayang runtime.
+
+See [shared Core integration](../architecture/shared-core-integration.md).
