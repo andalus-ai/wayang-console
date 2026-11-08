@@ -34,6 +34,14 @@ public class PublisherSigningKeyResource {
                         new PublisherSigningKeyTrustService.RegisterCommand(request.keyId(), request.publicKeyDerBase64()));
     }
 
+    @GET
+    @Path("/{keyId}/history")
+    public List<PublisherSigningKeyTrustService.KeyEvent> history(
+            @QueryParam("environmentId") String environmentId, @PathParam("keyId") String keyId) {
+        operator.requirePublisherTrustRead();
+        return trust.history(operator.organizationId(), operator.requireEnvironment(environmentId), keyId);
+    }
+
     @POST
     @Path("/{keyId}/revoke")
     public PublisherSigningKeyTrustService.KeyView revoke(@QueryParam("environmentId") String environmentId,
