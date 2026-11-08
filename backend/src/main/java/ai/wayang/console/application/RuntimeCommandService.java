@@ -138,6 +138,15 @@ public class RuntimeCommandService {
 
         if (!"LEASED".equals(command.status) && !"RUNNING".equals(command.status))
             throw new WebApplicationException("Command must be leased before completion", 409);
+        if ("SUCCEEDED".equals(status)) {
+            DeploymentEntity target = DeploymentEntity.findById(command.deploymentId, LockModeType.PESSIMISTIC_WRITE);
+            String verified = verifiedArtifactDigest == null ? "" : verifiedArtifactDigest.trim().toLowerCase();
+            if (target == null || !verified.matches("sha256:[0-9a-f]{64}")
+                    || !target.artifactDigest.equalsIgnoreCase(verified)) {
+                throw new WebApplicationException("Successful deployment acknowledgement must include the matching verified artifact digest", 409);
+            }
+            command.verifiedArtifactDigest = verified;
+        }
         command.status = status;
         command.completedAt = now;
         command.leaseUntil = null;
