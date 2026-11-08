@@ -1,5 +1,6 @@
 package ai.wayang.console.api;
-import ai.wayang.console.application.PluginApprovalService; import ai.wayang.console.security.ConsoleOperatorContext;\nimport java.util.List;
+import ai.wayang.console.application.PluginApprovalService; import ai.wayang.console.security.ConsoleOperatorContext;
+import java.util.List;
 import io.quarkus.security.Authenticated; import jakarta.inject.Inject; import jakarta.ws.rs.*; import jakarta.ws.rs.core.MediaType;
 @Path("/api/v1/console/plugin-catalog/{pluginId}/versions/{version}/approval") @Authenticated @Consumes(MediaType.APPLICATION_JSON) @Produces(MediaType.APPLICATION_JSON)
 public class PluginApprovalResource {
