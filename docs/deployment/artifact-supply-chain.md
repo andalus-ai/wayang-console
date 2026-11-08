@@ -9,7 +9,7 @@ Operator admins upload raw bytes to `POST /api/v1/console/artifacts` using `appl
 - `X-Signing-Key-Id: <key identifier>`
 - `X-Artifact-Signature: <base64 Ed25519 signature>`
 
-The signature covers UTF-8 bytes of `artifactDigest + "\\n" + manifestDigest + "\\n" + keyId`. The trust key is Base64-encoded Ed25519 SubjectPublicKeyInfo DER configured by `WAYANG_CONSOLE_ARTIFACT_SIGNING_PUBLIC_KEY`. The private key remains in the release-signing pipeline, never in Console.
+The signature covers UTF-8 bytes of `artifactDigest + "\\n" + manifestDigest + "\\n" + keyId`. The trust key is Base64-encoded Ed25519 SubjectPublicKeyInfo DER configured by `WAYANG_CONSOLE_ARTIFACT_SIGNING_PUBLIC_KEY`; the matching trusted identifier is configured by `WAYANG_CONSOLE_ARTIFACT_SIGNING_KEY_ID`. The manifest is embedded in the signed artifact bundle; the runtime extracts it and verifies its digest against the signed manifest digest before applying the package. The private key remains in the release-signing pipeline, never in Console.
 
 Uploads require exactly one selected environment. Bytes are streamed to a temporary file, size-limited, SHA-256 checked, and atomically published. A mismatch or invalid signature rejects registration and removes the staged object.
 
@@ -20,6 +20,7 @@ Uploads require exactly one selected environment. Bytes are streamed to a tempor
 - `wayang.console.artifacts.root` — local root, default `./data/artifacts`
 - `wayang.console.artifacts.max-size-bytes` — default 256 MiB
 - `wayang.console.artifacts.ed25519-public-key` — trusted public key (required for upload)
+- `wayang.console.artifacts.signing-key-id` — exact trusted key identifier
 - `wayang.console.artifacts.require-registered` — enabled in production; deployment creation requires an uploaded artifact and matching manifest.
 
 The `ArtifactStorage` port allows S3-compatible adapters without changing application contracts. This milestone ships the local adapter; S3 adapter, multi-key rotation/revocation, runtime-side signature verification, and compatibility policy remain follow-ups. Runtime must independently verify digest and signature before applying a deployment.
