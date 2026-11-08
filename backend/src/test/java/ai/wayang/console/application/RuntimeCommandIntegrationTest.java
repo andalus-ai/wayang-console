@@ -33,7 +33,7 @@ class RuntimeCommandIntegrationTest {
                 java.util.List.of(new RuntimeInventoryService.CapabilityInput("wayang.runtime", "1.2.0", "workflow.execute")),
                 java.util.List.of());
         var deployment = deployments.create(organization, Set.of(environment), runtimeId, "release-1",
-                "sample.workflow", "1.0.0", digest, digest, "1.1.0",
+                "sample.workflow", "1.0.0", digest, digest, "1.0.0",
                 java.util.List.of(new DeploymentLifecycleService.CapabilityRequirement("wayang.runtime", "workflow.execute", "1.1.0")),
                 "operator-test");
         deployments.transition(organization, Set.of(environment), deployment.id(), "VALIDATING", null, "operator-test");
