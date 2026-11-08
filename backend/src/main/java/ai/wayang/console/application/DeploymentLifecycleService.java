@@ -17,7 +17,7 @@ import java.util.UUID;
 public class DeploymentLifecycleService {
     @Inject AuditIntegrityService audit;
     @Inject ArtifactRegistryService artifacts;
-    @ConfigProperty(name = "wayang.console.artifacts.require-registered", defaultValue = "false") boolean requireRegisteredArtifact;
+    @Inject @ConfigProperty(name = "wayang.console.artifacts.require-registered", defaultValue = "false") boolean requireRegisteredArtifact;
 
     public record DeploymentView(UUID id, String deploymentId, UUID runtimeId, String workflowId,
             String workflowVersion, String artifactDigest, String manifestDigest, String status,
