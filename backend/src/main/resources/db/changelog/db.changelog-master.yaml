@@ -419,3 +419,61 @@ databaseChangeLog:
       rollback:
         - dropTable: { tableName: wc_plugin_catalog_governance_event }
         - dropTable: { tableName: wc_plugin_catalog_governance }
+
+  - changeSet:
+      id: 012-publisher-signing-key-trust
+      author: andalus-ai
+      changes:
+        - createTable:
+            tableName: wc_publisher_signing_key
+            columns:
+              - column: { name: id, type: UUID, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: organization_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: environment_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: key_id, type: VARCHAR(120), constraints: { nullable: false } }
+              - column: { name: fingerprint, type: VARCHAR(64), constraints: { nullable: false } }
+              - column: { name: public_key_der_base64, type: VARCHAR(512), constraints: { nullable: false } }
+              - column: { name: key_status, type: VARCHAR(16), constraints: { nullable: false } }
+              - column: { name: created_by, type: VARCHAR(255), constraints: { nullable: false } }
+              - column: { name: created_at, type: TIMESTAMP WITH TIME ZONE, constraints: { nullable: false } }
+              - column: { name: revoked_by, type: VARCHAR(255) }
+              - column: { name: revoked_at, type: TIMESTAMP WITH TIME ZONE }
+              - column: { name: revocation_reason, type: VARCHAR(1000) }
+              - column: { name: row_version, type: BIGINT, defaultValueNumeric: 0, constraints: { nullable: false } }
+        - addUniqueConstraint:
+            tableName: wc_publisher_signing_key
+            columnNames: organization_id, environment_id, key_id
+            constraintName: uk_wc_publisher_key_scope_id
+        - addUniqueConstraint:
+            tableName: wc_publisher_signing_key
+            columnNames: organization_id, environment_id, fingerprint
+            constraintName: uk_wc_publisher_key_scope_fingerprint
+        - createIndex:
+            tableName: wc_publisher_signing_key
+            indexName: idx_wc_publisher_key_scope_status
+            columns:
+              - column: { name: organization_id }
+              - column: { name: environment_id }
+              - column: { name: key_status }
+        - createTable:
+            tableName: wc_publisher_signing_key_event
+            columns:
+              - column: { name: id, type: UUID, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: organization_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: environment_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: key_id, type: VARCHAR(120), constraints: { nullable: false } }
+              - column: { name: fingerprint, type: VARCHAR(64), constraints: { nullable: false } }
+              - column: { name: event_type, type: VARCHAR(24), constraints: { nullable: false } }
+              - column: { name: actor_subject, type: VARCHAR(255), constraints: { nullable: false } }
+              - column: { name: reason, type: VARCHAR(1000) }
+              - column: { name: occurred_at, type: TIMESTAMP WITH TIME ZONE, constraints: { nullable: false } }
+        - createIndex:
+            tableName: wc_publisher_signing_key_event
+            indexName: idx_wc_publisher_key_event_scope_time
+            columns:
+              - column: { name: organization_id }
+              - column: { name: environment_id }
+              - column: { name: occurred_at }
+      rollback:
+        - dropTable: { tableName: wc_publisher_signing_key_event }
+        - dropTable: { tableName: wc_publisher_signing_key }
