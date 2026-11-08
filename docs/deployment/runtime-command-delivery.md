@@ -47,3 +47,18 @@ A runtime must send the digest of the artifact it actually verified and applied:
 The Console compares this value with the deployment's registered artifact digest before completing the command or changing the deployment to `DEPLOYED`. Missing, malformed, or mismatched evidence is rejected with HTTP 409; the command remains in its leased/running state so the runtime can submit a corrected acknowledgement before expiry. The accepted digest is persisted on the command for audit and reconciliation. Failed and STARTED acknowledgements do not require an artifact digest.
 
 This is evidence supplied by the authenticated runtime, not independent remote attestation. The runtime implementation must still verify the artifact bytes and signed manifest locally before reporting success.
+
+
+## Authenticated runtime inventory snapshots
+
+POST /api/v1/runtime/inventory replaces the reporting runtime's complete capability and workflow snapshot. The bearer credential determines runtime identity and tenant/environment scope; clients cannot select another runtime id.
+
+- Each collection is limited to 1,000 entries.
+- Required identifiers and versions are trimmed and length-checked against persistence limits.
+- Duplicate capability tuples and duplicate workflow ids are rejected.
+- Workflow definition digests must use sha256:<64 hex chars>.
+- Replacement is transactional: invalid input leaves the previous snapshot intact.
+- A successful report persists a new inventory revision and report timestamp, refreshes the runtime's two-minute lease, and marks it online.
+- The response returns the revision, item counts, and report timestamp. The audit stream records the report.
+
+A normal heartbeat does not refresh inventory freshness. Consumers that need capability-aware scheduling must distinguish a live runtime lease from a recently reported inventory snapshot. Existing runtimes with no snapshot remain discoverable, but their capability inventory is unknown. This change does not yet infer compatibility or automatically approve deployments.

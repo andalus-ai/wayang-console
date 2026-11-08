@@ -27,4 +27,6 @@ public class RuntimeInstanceEntity extends PanacheEntityBase {
     @Column(name = "registered_at", nullable = false) public Instant registeredAt;
     @Column(name = "last_seen_at") public Instant lastSeenAt;
     @Column(name = "lease_expires_at") public Instant leaseExpiresAt;
+    @Column(name = "inventory_revision", length = 36) public String inventoryRevision;
+    @Column(name = "inventory_reported_at") public Instant inventoryReportedAt;
 }

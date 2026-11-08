@@ -23,7 +23,7 @@ public class RuntimeRegistryResource {
                                  int heartbeatIntervalSeconds) {}
     public record InventoryRequest(List<RuntimeInventoryService.CapabilityInput> capabilities,
                                    List<RuntimeInventoryService.WorkflowInput> workflows) {}
-    public record InventoryResponse(String revision, int capabilityCount, int workflowCount) {}
+    public record InventoryResponse(String revision, int capabilityCount, int workflowCount, Instant reportedAt) {}
     public record HeartbeatRequest(String health) {}
     public record HeartbeatResponse(Instant leaseExpiresAt, int heartbeatIntervalSeconds) {}
 
@@ -59,16 +59,17 @@ public class RuntimeRegistryResource {
     public Response reportInventory(@HeaderParam("Authorization") String authorization, InventoryRequest request) {
         String token = bearer(authorization);
         if (token == null) return Response.status(401).entity(new ErrorResponse("unauthorized", "Bearer token required")).build();
+        if (request == null) return Response.status(400).entity(new ErrorResponse("invalid_inventory", "Request body is required")).build();
         try {
             var runtime = registry.authenticate(token);
-            var result = inventory.replaceInventory(runtime.id(),
-                    request == null ? null : request.capabilities(),
-                    request == null ? null : request.workflows());
-            return Response.ok(new InventoryResponse(result.revision(), result.capabilityCount(), result.workflowCount())).build();
+            var result = inventory.replaceInventory(runtime.id(), request.capabilities(), request.workflows());
+            return Response.ok(new InventoryResponse(result.revision(), result.capabilityCount(), result.workflowCount(), result.reportedAt())).build();
         } catch (SecurityException e) {
             return Response.status(401).entity(new ErrorResponse("unauthorized", "Runtime credential is invalid or expired")).build();
         } catch (IllegalArgumentException e) {
             return Response.status(400).entity(new ErrorResponse("invalid_inventory", e.getMessage())).build();
+        } catch (NotFoundException e) {
+            return Response.status(404).entity(new ErrorResponse("runtime_not_found", e.getMessage())).build();
         }
     }
 

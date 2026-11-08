@@ -277,3 +277,16 @@ databaseChangeLog:
               - column: { name: verified_artifact_digest, type: VARCHAR(71) }
       rollback:
         - dropColumn: { tableName: wc_management_command, columnName: verified_artifact_digest }
+
+  - changeSet:
+      id: 008-runtime-inventory-freshness
+      author: andalus-ai
+      changes:
+        - addColumn:
+            tableName: wc_runtime_instance
+            columns:
+              - column: { name: inventory_revision, type: VARCHAR(36) }
+              - column: { name: inventory_reported_at, type: TIMESTAMP WITH TIME ZONE }
+      rollback:
+        - dropColumn: { tableName: wc_runtime_instance, columnName: inventory_reported_at }
+        - dropColumn: { tableName: wc_runtime_instance, columnName: inventory_revision }
