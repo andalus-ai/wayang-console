@@ -16,9 +16,11 @@ public class DeploymentResource {
     @Inject ConsoleOperatorContext operator;
     @Inject ai.wayang.console.application.DeploymentLifecycleService deployments;
     @Inject RuntimeCommandService commands;
+    @Inject ai.wayang.console.application.RuntimeCompatibilityEvaluator compatibility;
 
     public record CreateRequest(UUID runtimeId, String deploymentId, String workflowId,
-            String workflowVersion, String artifactDigest, String manifestDigest) {}
+            String workflowVersion, String artifactDigest, String manifestDigest,
+            java.util.List<ai.wayang.console.application.DeploymentLifecycleService.CapabilityRequirement> requiredCapabilities) {}
 
     @POST
     public ai.wayang.console.application.DeploymentLifecycleService.DeploymentView create(CreateRequest request) {
@@ -26,7 +28,7 @@ public class DeploymentResource {
         if (request == null) throw new BadRequestException("Request body is required");
         return deployments.create(operator.organizationId(), operator.environmentIds(), request.runtimeId(),
                 request.deploymentId(), request.workflowId(), request.workflowVersion(), request.artifactDigest(),
-                request.manifestDigest(), operator.subject());
+                request.manifestDigest(), request.requiredCapabilities(), operator.subject());
     }
 
     @GET
@@ -46,6 +48,14 @@ public class DeploymentResource {
         if (request == null) throw new BadRequestException("Request body is required");
         return deployments.transition(operator.organizationId(), operator.environmentIds(), deploymentId,
                 request.status(), request.failureReason(), operator.subject());
+    }
+
+    @GET
+    @Path("/{deploymentId}/compatibility")
+    public ai.wayang.console.application.RuntimeCompatibilityEvaluator.Evaluation compatibility(
+            @PathParam("deploymentId") UUID deploymentId) {
+        operator.requireRead();
+        return compatibility.evaluate(deploymentId, operator.organizationId(), operator.environmentIds());
     }
 
     @POST
