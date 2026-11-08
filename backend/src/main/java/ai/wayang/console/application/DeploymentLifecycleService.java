@@ -7,6 +7,7 @@ import jakarta.inject.Inject;
 import jakarta.persistence.LockModeType;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.NotFoundException;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -15,6 +16,8 @@ import java.util.UUID;
 @ApplicationScoped
 public class DeploymentLifecycleService {
     @Inject AuditIntegrityService audit;
+    @Inject ArtifactRegistryService artifacts;
+    @Inject @ConfigProperty(name = "wayang.console.artifacts.require-registered", defaultValue = "false") boolean requireRegisteredArtifact;
 
     public record DeploymentView(UUID id, String deploymentId, UUID runtimeId, String workflowId,
             String workflowVersion, String artifactDigest, String manifestDigest, String status,
@@ -34,6 +37,7 @@ public class DeploymentLifecycleService {
         required(workflowVersion, "workflowVersion");
         digest(artifactDigest, "artifactDigest");
         digest(manifestDigest, "manifestDigest");
+        if (requireRegisteredArtifact) artifacts.assertRegistered(organizationId, runtime.environmentId, artifactDigest, manifestDigest);
         if (DeploymentEntity.find("organizationId = ?1 and environmentId = ?2 and deploymentId = ?3",
                 organizationId, runtime.environmentId, deploymentId).firstResult() != null)
             throw new jakarta.ws.rs.WebApplicationException("Deployment id already exists in this scope", 409);
