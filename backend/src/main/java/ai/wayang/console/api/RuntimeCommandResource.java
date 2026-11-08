@@ -16,7 +16,7 @@ public class RuntimeCommandResource {
     @Inject RuntimeCommandService commands;
 
     public record PollRequest(Integer limit) {}
-    public record AckRequest(String status, String message) {}
+    public record AckRequest(String status, String message, String verifiedArtifactDigest) {}
     public record ErrorResponse(String code, String message) {}
 
     @POST
@@ -42,7 +42,7 @@ public class RuntimeCommandResource {
         if (request == null) return Response.status(400).entity(new ErrorResponse("invalid_request", "Request body is required")).build();
         try {
             var runtime = registry.authenticate(token);
-            return Response.ok(commands.acknowledge(runtime, commandId, request.status(), request.message())).build();
+            return Response.ok(commands.acknowledge(runtime, commandId, request.status(), request.message(), request.verifiedArtifactDigest())).build();
         } catch (SecurityException e) {
             return unauthorized();
         } catch (NotFoundException e) {
