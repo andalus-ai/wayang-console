@@ -146,6 +146,7 @@ public class DeploymentLifecycleService {
     private static String requiredBounded(String s,int max,String n){
         String value = required(s,n);
         if(value.length()>max) throw new IllegalArgumentException(n+" exceeds "+max+" characters");
+        if(value.chars().anyMatch(Character::isISOControl)) throw new IllegalArgumentException(n+" must not contain control characters");
         return value;
     }
     private static String required(String s,String n){if(s==null||s.isBlank())throw new IllegalArgumentException(n+" required");return s.trim();}
