@@ -1,6 +1,7 @@
 package ai.wayang.console.application;
 
 import ai.wayang.console.adapter.persistence.DeploymentEntity;
+import ai.wayang.console.adapter.persistence.DeploymentCapabilityRequirementEntity;
 import ai.wayang.console.adapter.persistence.ManagementCommandEntity;
 import ai.wayang.console.adapter.persistence.RuntimeInstanceEntity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -24,6 +25,7 @@ public class RuntimeCommandService {
     private static final int MAX_ATTEMPTS = 12;
 
     @Inject AuditIntegrityService audit;
+    @Inject RuntimeCompatibilityEvaluator compatibility;
 
     public record CommandView(UUID commandId, String idempotencyKey, String commandType,
             String typedPayload, Instant expiresAt, int attemptCount) {}
@@ -39,6 +41,13 @@ public class RuntimeCommandService {
         if (existing != null) return view(existing);
         if (!"READY".equals(deployment.status))
             throw new WebApplicationException("Only READY deployments can be dispatched", 409);
+        RuntimeCompatibilityEvaluator.Evaluation evaluation = compatibility.evaluate(deployment);
+        if (!evaluation.compatible()) {
+            String diagnostics = evaluation.diagnostics().stream()
+                    .map(diagnostic -> diagnostic.code() + ": " + diagnostic.message())
+                    .collect(java.util.stream.Collectors.joining("; "));
+            throw new WebApplicationException("Runtime is not compatible with this deployment: " + diagnostics, 409);
+        }
 
         Instant now = Instant.now();
         ManagementCommandEntity command = new ManagementCommandEntity();
@@ -193,10 +202,22 @@ public class RuntimeCommandService {
     }
 
     private static String payload(DeploymentEntity d) {
+        List<DeploymentCapabilityRequirementEntity> requirements =
+                DeploymentCapabilityRequirementEntity.list("deploymentId", d.id);
+        String requirementsJson = requirements.stream()
+                .map(requirement -> "{\"componentId\":\"" + escape(requirement.componentId)
+                        + "\",\"capability\":\"" + escape(requirement.capability)
+                        + "\",\"minimumVersion\":" + (requirement.minimumVersion == null
+                                ? "null" : "\"" + escape(requirement.minimumVersion) + "\"") + "}")
+                .collect(java.util.stream.Collectors.joining(","));
         return "{\"deploymentRecordId\":\"" + d.id + "\",\"deploymentId\":\"" + escape(d.deploymentId)
                 + "\",\"workflowId\":\"" + escape(d.workflowId) + "\",\"workflowVersion\":\""
                 + escape(d.workflowVersion) + "\",\"artifactDigest\":\"" + escape(d.artifactDigest)
-                + "\",\"manifestDigest\":\"" + escape(d.manifestDigest) + "\",\"artifactUri\":\"/api/v1/runtime/artifacts/" + escape(d.artifactDigest) + "\"}";
+                + "\",\"manifestDigest\":\"" + escape(d.manifestDigest)
+                + "\",\"artifactUri\":\"/api/v1/runtime/artifacts/" + escape(d.artifactDigest)
+                + "\",\"minimumRuntimeVersion\":" + (d.minimumRuntimeVersion == null
+                        ? "null" : "\"" + escape(d.minimumRuntimeVersion) + "\"")
+                + ",\"requiredCapabilities\":[" + requirementsJson + "]}";
     }
     private static String escape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"")

@@ -21,6 +21,7 @@ public class DeploymentEntity extends PanacheEntityBase {
     @Column(name = "workflow_version", nullable = false, length = 80) public String workflowVersion;
     @Column(name = "artifact_digest", nullable = false, length = 128) public String artifactDigest;
     @Column(name = "manifest_digest", nullable = false, length = 128) public String manifestDigest;
+    @Column(name = "minimum_runtime_version", length = 80) public String minimumRuntimeVersion;
     @Column(name = "status", nullable = false, length = 24) public String status;
     @Column(name = "requested_by", nullable = false, length = 255) public String requestedBy;
     @Column(name = "created_at", nullable = false) public Instant createdAt;

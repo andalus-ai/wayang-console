@@ -30,7 +30,7 @@ A command is scoped to the runtime that enrolled with the Console. A runtime can
 
 ## Current boundary
 
-The command carries deployment identity, workflow/version, and artifact/manifest digests. This milestone establishes durable delivery and acknowledgement, not artifact hosting, artifact transfer, runtime-side signature verification, or automatic compatibility evaluation. Those remain follow-up work. The runtime must verify artifact and manifest digests against its trusted package source before reporting success.
+The command carries deployment identity, workflow/version, and artifact/manifest digests. This milestone establishes durable delivery and acknowledgement. Artifact hosting, transfer, and runtime-side signature verification are handled by the artifact registry and runtime verification contract; compatibility evaluation is now enforced before dispatch. The runtime must verify artifact and manifest digests against its trusted package source before reporting success.
 
 ## Verified deployment completion (M1.9)
 
@@ -61,4 +61,36 @@ POST /api/v1/runtime/inventory replaces the reporting runtime's complete capabil
 - A successful report persists a new inventory revision and report timestamp, refreshes the runtime's two-minute lease, and marks it online.
 - The response returns the revision, item counts, and report timestamp. The audit stream records the report.
 
-A normal heartbeat does not refresh inventory freshness. Consumers that need capability-aware scheduling must distinguish a live runtime lease from a recently reported inventory snapshot. Existing runtimes with no snapshot remain discoverable, but their capability inventory is unknown. This change does not yet infer compatibility or automatically approve deployments.
+A normal heartbeat does not refresh inventory freshness. Consumers that need capability-aware scheduling must distinguish a live runtime lease from a recently reported inventory snapshot. Existing runtimes with no snapshot remain discoverable, but their capability inventory is unknown. The compatibility gate below treats unknown inventory as incompatible for new deployment dispatch.
+
+
+## Runtime compatibility gate (M1.9)
+
+Deployment creation accepts an optional `requiredCapabilities` array. Each entry contains:
+
+- `minimumRuntimeVersion`: optional minimum Wayang runtime version (numeric dotted form)
+- `componentId`: runtime component identifier
+- `capability`: capability identifier
+- `minimumVersion`: optional numeric dotted version (for example `1.4.0`)
+
+Example:
+
+```json
+{
+  "runtimeId": "…",
+  "deploymentId": "release-2026-11",
+  "workflowId": "orders.process",
+  "workflowVersion": "2.1.0",
+  "artifactDigest": "sha256:<64-hex-digest>",
+  "manifestDigest": "sha256:<64-hex-digest>",
+  "minimumRuntimeVersion": "1.4.0",
+  "requiredCapabilities": [
+    { "componentId": "wayang.runtime", "capability": "workflow.execute", "minimumVersion": "1.4.0" },
+    { "componentId": "wayang.connector.postgresql", "capability": "database.postgresql" }
+  ]
+}
+```
+
+The operator can inspect `GET /api/v1/console/deployments/{deploymentId}/compatibility` for a structured evaluation. Dispatch re-evaluates compatibility inside its transaction and returns HTTP 409 when the target is offline, its lease has expired, its inventory is missing or older than five minutes, or a required capability/version is absent.
+
+Capability matching is case-insensitive by component and capability identifier. Version requirements currently use numeric dotted versions (optional leading `v`); non-numeric runtime versions do not satisfy a minimum-version constraint. Deployments with no explicit capability requirements still require a live runtime and fresh inventory. The evaluator is a Console-side policy boundary, not remote attestation: capability declarations remain runtime-reported evidence.

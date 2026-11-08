@@ -290,3 +290,28 @@ databaseChangeLog:
       rollback:
         - dropColumn: { tableName: wc_runtime_instance, columnName: inventory_reported_at }
         - dropColumn: { tableName: wc_runtime_instance, columnName: inventory_revision }
+
+  - changeSet:
+      id: 009-deployment-capability-requirements
+      author: andalus-ai
+      changes:
+        - addColumn:
+            tableName: wc_deployment
+            columns:
+              - column: { name: minimum_runtime_version, type: VARCHAR(80) }
+        - createTable:
+            tableName: wc_deployment_capability_requirement
+            columns:
+              - column: { name: id, type: UUID, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: deployment_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: component_id, type: VARCHAR(180), constraints: { nullable: false } }
+              - column: { name: capability, type: VARCHAR(180), constraints: { nullable: false } }
+              - column: { name: minimum_version, type: VARCHAR(80) }
+        - createIndex:
+            tableName: wc_deployment_capability_requirement
+            indexName: idx_wc_deployment_requirement
+            columns:
+              - column: { name: deployment_id }
+      rollback:
+        - dropTable: { tableName: wc_deployment_capability_requirement }
+        - dropColumn: { tableName: wc_deployment, columnName: minimum_runtime_version }
