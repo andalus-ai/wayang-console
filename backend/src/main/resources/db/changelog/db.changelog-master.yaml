@@ -347,3 +347,48 @@ databaseChangeLog:
               - column: { name: created_at }
       rollback:
         - dropTable: { tableName: wc_plugin_catalog_entry }
+
+  - changeSet:
+      id: 011-plugin-catalog-governance
+      author: andalus-ai
+      changes:
+        - createTable:
+            tableName: wc_plugin_catalog_governance
+            columns:
+              - column: { name: id, type: UUID, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: catalog_entry_id, type: UUID, constraints: { nullable: false, unique: true } }
+              - column: { name: organization_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: environment_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: lifecycle_status, type: VARCHAR(24), constraints: { nullable: false } }
+              - column: { name: reason, type: VARCHAR(1000) }
+              - column: { name: changed_by, type: VARCHAR(255), constraints: { nullable: false } }
+              - column: { name: changed_at, type: TIMESTAMP WITH TIME ZONE, constraints: { nullable: false } }
+              - column: { name: row_version, type: BIGINT, defaultValueNumeric: 0, constraints: { nullable: false } }
+        - createIndex:
+            tableName: wc_plugin_catalog_governance
+            indexName: idx_wc_plugin_governance_scope_status
+            columns:
+              - column: { name: organization_id }
+              - column: { name: environment_id }
+              - column: { name: lifecycle_status }
+        - createTable:
+            tableName: wc_plugin_catalog_governance_event
+            columns:
+              - column: { name: id, type: UUID, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: catalog_entry_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: organization_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: environment_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: from_status, type: VARCHAR(24) }
+              - column: { name: to_status, type: VARCHAR(24), constraints: { nullable: false } }
+              - column: { name: reason, type: VARCHAR(1000) }
+              - column: { name: actor_subject, type: VARCHAR(255), constraints: { nullable: false } }
+              - column: { name: occurred_at, type: TIMESTAMP WITH TIME ZONE, constraints: { nullable: false } }
+        - createIndex:
+            tableName: wc_plugin_catalog_governance_event
+            indexName: idx_wc_plugin_governance_event_entry_time
+            columns:
+              - column: { name: catalog_entry_id }
+              - column: { name: occurred_at }
+      rollback:
+        - dropTable: { tableName: wc_plugin_catalog_governance_event }
+        - dropTable: { tableName: wc_plugin_catalog_governance }
