@@ -19,7 +19,7 @@ public class DeploymentResource {
     @Inject ai.wayang.console.application.RuntimeCompatibilityEvaluator compatibility;
 
     public record CreateRequest(UUID runtimeId, String deploymentId, String workflowId,
-            String workflowVersion, String artifactDigest, String manifestDigest,
+            String workflowVersion, String artifactDigest, String manifestDigest, String minimumRuntimeVersion,
             java.util.List<ai.wayang.console.application.DeploymentLifecycleService.CapabilityRequirement> requiredCapabilities) {}
 
     @POST
@@ -28,7 +28,7 @@ public class DeploymentResource {
         if (request == null) throw new BadRequestException("Request body is required");
         return deployments.create(operator.organizationId(), operator.environmentIds(), request.runtimeId(),
                 request.deploymentId(), request.workflowId(), request.workflowVersion(), request.artifactDigest(),
-                request.manifestDigest(), request.requiredCapabilities(), operator.subject());
+                request.manifestDigest(), request.minimumRuntimeVersion(), request.requiredCapabilities(), operator.subject());
     }
 
     @GET
