@@ -3,6 +3,7 @@ package ai.wayang.console.application;
 import ai.wayang.console.adapter.persistence.DeploymentEntity;
 import ai.wayang.console.adapter.persistence.DeploymentCapabilityRequirementEntity;
 import ai.wayang.console.adapter.persistence.ManagementCommandEntity;
+import ai.wayang.console.adapter.persistence.DeploymentReconciliationEntity;
 import ai.wayang.console.adapter.persistence.RuntimeInstanceEntity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -36,7 +37,13 @@ public class RuntimeCommandService {
     public CommandView dispatch(UUID organizationId, Set<UUID> environments,
             UUID deploymentId, String actor) {
         DeploymentEntity deployment = scopedDeployment(organizationId, environments, deploymentId, true);
-        String idempotencyKey = "deployment:" + deployment.id + ":apply:v1";
+        DeploymentReconciliationEntity reconciliation = DeploymentReconciliationEntity
+                .<DeploymentReconciliationEntity>find("deploymentId", deployment.id)
+                .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
+        long generation = reconciliation == null ? 1L : reconciliation.generation;
+        if (reconciliation != null && !"PRESENT".equals(reconciliation.desiredState))
+            throw new WebApplicationException("Deployment desired state is not PRESENT", 409);
+        String idempotencyKey = "deployment:" + deployment.id + ":generation:" + generation + ":apply:v1";
         ManagementCommandEntity existing = ManagementCommandEntity.find("idempotencyKey", idempotencyKey).firstResult();
         if (existing != null) return view(existing);
         if (!"READY".equals(deployment.status))
@@ -58,7 +65,7 @@ public class RuntimeCommandService {
         command.deploymentId = deployment.id;
         command.idempotencyKey = idempotencyKey;
         command.commandType = "APPLY_DEPLOYMENT";
-        command.typedPayload = payload(deployment);
+        command.typedPayload = payload(deployment, generation);
         command.status = "PENDING";
         command.attemptCount = 0;
         command.maxAttempts = MAX_ATTEMPTS;
@@ -201,7 +208,7 @@ public class RuntimeCommandService {
                 "DEPLOYMENT_COMMAND_EXPIRED", "MANAGEMENT_COMMAND", command.id.toString(), now, "FAILURE");
     }
 
-    private static String payload(DeploymentEntity d) {
+    private static String payload(DeploymentEntity d, long generation) {
         List<DeploymentCapabilityRequirementEntity> requirements =
                 DeploymentCapabilityRequirementEntity.list("deploymentId", d.id);
         String requirementsJson = requirements.stream()
