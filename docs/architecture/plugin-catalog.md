@@ -53,7 +53,7 @@ Likewise, per-runtime installed plugin versions belong to runtime inventory, not
 
 The first implementation milestone is a contract only. A subsequent Console backend change should add an organization/environment-scoped, operator-admin write API and read API for catalog metadata, with immutable plugin-version records and idempotent upsert semantics. It must not overload `RuntimeInventoryService` or `ArtifactRegistryService`.
 
-Recommended future resource shape:
+Implemented initial resource shape:
 
 - `PUT /api/v1/console/plugin-catalog/{pluginId}/versions/{version}` — publish/update validated metadata for an immutable version; repeated identical content is idempotent, conflicting content requires a new version.
 - `GET /api/v1/console/plugin-catalog` — list catalog entries in the caller's authorized scope.

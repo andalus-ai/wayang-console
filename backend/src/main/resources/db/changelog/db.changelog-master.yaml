@@ -315,3 +315,35 @@ databaseChangeLog:
       rollback:
         - dropTable: { tableName: wc_deployment_capability_requirement }
         - dropColumn: { tableName: wc_deployment, columnName: minimum_runtime_version }
+
+  - changeSet:
+      id: 010-versioned-plugin-catalog
+      author: andalus-ai
+      changes:
+        - createTable:
+            tableName: wc_plugin_catalog_entry
+            columns:
+              - column: { name: id, type: UUID, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: organization_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: environment_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: plugin_id, type: VARCHAR(180), constraints: { nullable: false } }
+              - column: { name: plugin_version, type: VARCHAR(80), constraints: { nullable: false } }
+              - column: { name: manifest_digest, type: VARCHAR(71), constraints: { nullable: false } }
+              - column: { name: metadata_json, type: TEXT, constraints: { nullable: false } }
+              - column: { name: metadata_digest, type: VARCHAR(71), constraints: { nullable: false } }
+              - column: { name: published_by, type: VARCHAR(255), constraints: { nullable: false } }
+              - column: { name: created_at, type: TIMESTAMP WITH TIME ZONE, constraints: { nullable: false } }
+        - addUniqueConstraint:
+            tableName: wc_plugin_catalog_entry
+            columnNames: organization_id, environment_id, plugin_id, plugin_version
+            constraintName: uk_wc_plugin_catalog_scope_version
+        - createIndex:
+            tableName: wc_plugin_catalog_entry
+            indexName: idx_wc_plugin_catalog_scope_plugin
+            columns:
+              - column: { name: organization_id }
+              - column: { name: environment_id }
+              - column: { name: plugin_id }
+              - column: { name: created_at }
+      rollback:
+        - dropTable: { tableName: wc_plugin_catalog_entry }
