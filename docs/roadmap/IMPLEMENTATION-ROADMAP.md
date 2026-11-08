@@ -59,3 +59,16 @@
 - [ ] Add cross-repository compatibility CI with Wayang runtime.
 
 See [shared Core integration](../architecture/shared-core-integration.md).
+
+### M7 acceptance criteria
+
+M7 is complete only when all of the following are true:
+
+- The current management protobuf has golden compatibility fixtures covering registration, heartbeat, inventory, command polling and acknowledgements.
+- Core publishes a versioned management-contract artifact/schema from a single canonical source; Console does not maintain a parallel copy.
+- Wayang Runtime and Console consume the same released contract version (or a documented overlapping compatibility range).
+- Existing runtime-to-Console interoperability is verified by contract/integration tests, including unknown additive fields and mixed supported versions.
+- Console persistence entities and internal REST/admin DTOs remain local unless they are deliberately designated public cross-process contracts.
+- Rollback to the previous compatible contract version is documented and tested.
+
+Do not mark M7 complete when only a protobuf file has been copied or a Maven dependency has been added. The release gate is proven wire compatibility between the actual runtime and Console consumers.
