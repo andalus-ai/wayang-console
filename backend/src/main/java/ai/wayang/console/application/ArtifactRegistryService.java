@@ -17,6 +17,7 @@ public class ArtifactRegistryService {
  @Inject AuditIntegrityService audit;
  @Inject @ConfigProperty(name="wayang.console.artifacts.max-size-bytes",defaultValue="268435456") long maxBytes;
  @Inject @ConfigProperty(name="wayang.console.artifacts.ed25519-public-key",defaultValue="") String trustedPublicKey;
+ @Inject @ConfigProperty(name="wayang.console.artifacts.signing-key-id",defaultValue="") String trustedKeyId;
  public record ArtifactView(UUID id,String artifactDigest,String manifestDigest,long sizeBytes,String signingKeyId,Instant createdAt){}
  public record Download(String digest,String manifestDigest,String signature,String signingKeyId,long sizeBytes,InputStream content){}
  @Transactional
@@ -46,6 +47,8 @@ public class ArtifactRegistryService {
   try{return new Download(a.artifactDigest,a.manifestDigest,a.signature,a.signingKeyId,a.sizeBytes,storage.open(a.objectKey));}catch(IOException e){throw new WebApplicationException("Artifact storage unavailable",503);}
  }
  private void verify(String digest,String manifest,String keyId,String sig){
+  if(trustedKeyId==null||trustedKeyId.isBlank())throw new WebApplicationException("Artifact signing key id is not configured",503);
+  if(!trustedKeyId.equals(keyId))throw new WebApplicationException("Artifact signing key id is not trusted",400);
   try{
    if(!ArtifactSignatureVerifier.verify(trustedPublicKey,digest,manifest,keyId,sig))
     throw new WebApplicationException("Artifact signature verification failed",400);
