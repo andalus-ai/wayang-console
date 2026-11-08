@@ -62,3 +62,10 @@ Backend requirements and commands are documented in [backend/README.md](backend/
 
 - Adds durable, idempotent deployment command dispatch, runtime polling leases, authenticated acknowledgements, and deployment status reconciliation.
 - Delivery is at-least-once; runtime consumers must deduplicate commands by stable command ID/idempotency key. Artifact transfer and signature verification remain separate follow-up work.
+
+
+### M1.8 artifact supply chain
+
+- Adds scoped artifact registration, streaming SHA-256 verification, Ed25519 signature validation, runtime-authenticated downloads, and a pluggable storage port with a local filesystem adapter.
+- Production deployment creation requires the requested artifact and manifest to be registered and verified. Configure the trusted public key through `WAYANG_CONSOLE_ARTIFACT_SIGNING_PUBLIC_KEY`.
+- See [artifact supply chain](docs/deployment/artifact-supply-chain.md).
