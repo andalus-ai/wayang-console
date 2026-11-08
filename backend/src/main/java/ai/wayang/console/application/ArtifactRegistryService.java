@@ -46,13 +46,12 @@ public class ArtifactRegistryService {
   try{return new Download(a.artifactDigest,a.manifestDigest,a.signature,a.signingKeyId,a.sizeBytes,storage.open(a.objectKey));}catch(IOException e){throw new WebApplicationException("Artifact storage unavailable",503);}
  }
  private void verify(String digest,String manifest,String keyId,String sig){
-  if(trustedPublicKey==null||trustedPublicKey.isBlank())throw new WebApplicationException("Artifact signing trust is not configured",503);
   try{
-   var key=KeyFactory.getInstance("Ed25519").generatePublic(new X509EncodedKeySpec(Base64.getDecoder().decode(trustedPublicKey.trim())));
-   Signature v=Signature.getInstance("Ed25519");v.initVerify(key);
-   v.update((digest+"\n"+manifest+"\n"+keyId).getBytes(StandardCharsets.UTF_8));
-   if(!v.verify(Base64.getDecoder().decode(sig)))throw new WebApplicationException("Artifact signature verification failed",400);
-  }catch(WebApplicationException e){throw e;}catch(Exception e){throw new WebApplicationException("Invalid signature or trust key",400);}
+   if(!ArtifactSignatureVerifier.verify(trustedPublicKey,digest,manifest,keyId,sig))
+    throw new WebApplicationException("Artifact signature verification failed",400);
+  }catch(WebApplicationException e){throw e;}
+  catch(IllegalStateException e){throw new WebApplicationException(e.getMessage(),503);}
+  catch(Exception e){throw new WebApplicationException("Invalid signature or trust key",400);}
  }
  private static void validateDigest(String d,String n){if(d==null||!d.matches("(?i)sha256:[0-9a-f]{64}"))throw new WebApplicationException(n+" must be sha256:<64 hex>",400);}
  private static String required(String s,String n){if(s==null||s.isBlank())throw new WebApplicationException(n+" required",400);return s.trim();}
