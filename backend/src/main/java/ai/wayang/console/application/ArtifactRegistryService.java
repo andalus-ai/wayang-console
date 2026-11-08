@@ -36,6 +36,17 @@ public class ArtifactRegistryService {
    audit.append(org,env,actor,"ARTIFACT_REGISTERED","ARTIFACT",a.id.toString(),now,"SUCCESS");return view(a);
   }catch(RuntimeException e){try{storage.delete(stored.objectKey());}catch(IOException cleanup){e.addSuppressed(cleanup);}throw e;}
  }
+ @Transactional public void assertManifestDistributable(UUID org,UUID env,String manifest){
+  if(manifest==null||!manifest.matches("(?i)sha256:[0-9a-f]{64}"))throw new WebApplicationException("Invalid manifest digest",400);
+  List<ArtifactEntity> matches=ArtifactEntity.list("organizationId = ?1 and environmentId = ?2 and manifestDigest = ?3",org,env,manifest.toLowerCase());
+  if(matches.isEmpty())throw new WebApplicationException("A registered artifact matching the catalog manifest is required",409);
+  WebApplicationException last=null;
+  for(ArtifactEntity artifact:matches){
+   try{verify(org,env,artifact.artifactDigest,artifact.manifestDigest,artifact.signingKeyId,artifact.signature);return;}
+   catch(WebApplicationException invalid){last=invalid;}
+  }
+  throw new WebApplicationException("No artifact for this manifest has a currently trusted signature",409,last);
+ }
  @Transactional public void assertRegistered(UUID org,UUID env,String digest,String manifest){
   ArtifactEntity a=ArtifactEntity.find("organizationId = ?1 and environmentId = ?2 and artifactDigest = ?3",org,env,digest.toLowerCase()).firstResult();
   if(a==null||!a.manifestDigest.equalsIgnoreCase(manifest))throw new WebApplicationException("Verified artifact and manifest are required",409);
