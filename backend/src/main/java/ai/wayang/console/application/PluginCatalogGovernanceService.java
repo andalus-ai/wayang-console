@@ -104,7 +104,7 @@ public class PluginCatalogGovernanceService {
                 .toList();
     }
 
-    private Status target(Status from, Action action) {
+    static Status target(Status from, Action action) {
         return switch (action) {
             case DEPRECATE -> {
                 if (from != Status.ACTIVE) throw new ConflictException("Only ACTIVE plugins can be deprecated");
