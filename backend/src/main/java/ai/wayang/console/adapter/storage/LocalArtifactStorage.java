@@ -33,8 +33,11 @@ public class LocalArtifactStorage implements ArtifactStorage {
             String key = org + "/" + env + "/" + digest.substring(7);
             Path target = dir.resolve(digest.substring(7)).normalize();
             if (!target.startsWith(dir)) throw new IOException("Invalid artifact key");
-            try { Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
-            catch (AtomicMoveNotSupportedException e) { Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING); }
+            try {
+                Files.move(temp, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
             return new StoredObject(key, digest, size);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 unavailable", e);
