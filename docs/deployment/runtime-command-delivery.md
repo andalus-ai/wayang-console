@@ -61,14 +61,15 @@ POST /api/v1/runtime/inventory replaces the reporting runtime's complete capabil
 - A successful report persists a new inventory revision and report timestamp, refreshes the runtime's two-minute lease, and marks it online.
 - The response returns the revision, item counts, and report timestamp. The audit stream records the report.
 
-A normal heartbeat does not refresh inventory freshness. Consumers that need capability-aware scheduling must distinguish a live runtime lease from a recently reported inventory snapshot. Existing runtimes with no snapshot remain discoverable, but their capability inventory is unknown. This change does not yet infer compatibility or automatically approve deployments.
+A normal heartbeat does not refresh inventory freshness. Consumers that need capability-aware scheduling must distinguish a live runtime lease from a recently reported inventory snapshot. Existing runtimes with no snapshot remain discoverable, but their capability inventory is unknown. The compatibility gate below treats unknown inventory as incompatible for new deployment dispatch.
 
 
 ## Runtime compatibility gate (M1.9)
 
 Deployment creation accepts an optional `requiredCapabilities` array. Each entry contains:
 
-- `minimumRuntimeVersion`: optional minimum Wayang runtime version (numeric dotted form)\n- `componentId`: runtime component identifier
+- `minimumRuntimeVersion`: optional minimum Wayang runtime version (numeric dotted form)
+- `componentId`: runtime component identifier
 - `capability`: capability identifier
 - `minimumVersion`: optional numeric dotted version (for example `1.4.0`)
 
@@ -81,7 +82,8 @@ Example:
   "workflowId": "orders.process",
   "workflowVersion": "2.1.0",
   "artifactDigest": "sha256:<64-hex-digest>",
-  "manifestDigest": "sha256:<64-hex-digest>",\n  "minimumRuntimeVersion": "1.4.0",
+  "manifestDigest": "sha256:<64-hex-digest>",
+  "minimumRuntimeVersion": "1.4.0",
   "requiredCapabilities": [
     { "componentId": "wayang.runtime", "capability": "workflow.execute", "minimumVersion": "1.4.0" },
     { "componentId": "wayang.connector.postgresql", "capability": "database.postgresql" }
