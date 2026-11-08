@@ -37,7 +37,7 @@ public class RuntimeInventoryService {
             String component = bounded(input.componentId(), 180, "componentId");
             String version = bounded(input.version(), 80, "version");
             String capability = bounded(input.capability(), 180, "capability");
-            require(capabilityKeys.add((component + "\\u0000" + version + "\\u0000" + capability).toLowerCase(Locale.ROOT)),
+            require(capabilityKeys.add(List.of(component.toLowerCase(Locale.ROOT), version.toLowerCase(Locale.ROOT), capability.toLowerCase(Locale.ROOT))),
                     "Inventory contains duplicate capabilities");
         }
         Set<String> workflowKeys = new HashSet<>();
