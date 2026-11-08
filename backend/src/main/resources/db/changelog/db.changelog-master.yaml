@@ -266,3 +266,14 @@ databaseChangeLog:
               - column: { name: artifact_digest }
       rollback:
         - dropTable: { tableName: wc_artifact }
+
+  - changeSet:
+      id: 007-runtime-verified-artifact-ack
+      author: andalus-ai
+      changes:
+        - addColumn:
+            tableName: wc_management_command
+            columns:
+              - column: { name: verified_artifact_digest, type: VARCHAR(71) }
+      rollback:
+        - dropColumn: { tableName: wc_management_command, columnName: verified_artifact_digest }
