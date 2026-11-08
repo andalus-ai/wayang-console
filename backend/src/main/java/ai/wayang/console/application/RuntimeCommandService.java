@@ -187,7 +187,7 @@ public class RuntimeCommandService {
         return "{\"deploymentRecordId\":\"" + d.id + "\",\"deploymentId\":\"" + escape(d.deploymentId)
                 + "\",\"workflowId\":\"" + escape(d.workflowId) + "\",\"workflowVersion\":\""
                 + escape(d.workflowVersion) + "\",\"artifactDigest\":\"" + escape(d.artifactDigest)
-                + "\",\"manifestDigest\":\"" + escape(d.manifestDigest) + "\"}";
+                + "\",\"manifestDigest\":\"" + escape(d.manifestDigest) + "\",\"artifactUri\":\"/api/v1/runtime/artifacts/" + escape(d.artifactDigest) + "\"}";
     }
     private static String escape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"")
