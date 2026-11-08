@@ -207,7 +207,7 @@ public class RuntimeCommandService {
                 + escape(d.workflowVersion) + "\",\"artifactDigest\":\"" + escape(d.artifactDigest)
                 + "\",\"manifestDigest\":\"" + escape(d.manifestDigest) + "\",\"artifactUri\":\"/api/v1/runtime/artifacts/" + escape(d.artifactDigest)
                 + "\",\"minimumRuntimeVersion\":" + (d.minimumRuntimeVersion == null ? "null" : "\"" + escape(d.minimumRuntimeVersion) + "\"")
-                + ",\"requiredCapabilities\":[" + DeploymentCapabilityRequirementEntity.<DeploymentCapabilityRequirementEntity>list("deploymentId", d.id)
+                + ",\"requiredCapabilities\":[" + DeploymentCapabilityRequirementEntity.list("deploymentId", d.id)
                     .stream().map(requirement -> "{\"componentId\":\"" + escape(requirement.componentId)
                             + "\",\"capability\":\"" + escape(requirement.capability)
                             + "\",\"minimumVersion\":" + (requirement.minimumVersion == null ? "null" : "\"" + escape(requirement.minimumVersion) + "\"") + "}")
