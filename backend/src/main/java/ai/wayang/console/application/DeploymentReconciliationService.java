@@ -97,7 +97,7 @@ public class DeploymentReconciliationService {
 
     @Transactional
     public ReconciliationView get(UUID organizationId, Set<UUID> environments, UUID deploymentId) {
-        scoped(deploymentId, organizationId, environments);
+        scopedForUpdate(deploymentId, organizationId, environments);
         DeploymentReconciliationEntity row = DeploymentReconciliationEntity.find("deploymentId", deploymentId).firstResult();
         if (row == null) throw new NotFoundException("Reconciliation state not found");
         return view(row);
