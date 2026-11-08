@@ -1,6 +1,9 @@
 package ai.wayang.console.application;
 
 import ai.wayang.console.adapter.persistence.ArtifactEntity;
+import ai.wayang.console.adapter.persistence.PluginCatalogEntryEntity;
+import ai.wayang.console.adapter.persistence.PluginApprovalEntity;
+import ai.wayang.console.adapter.persistence.PluginCatalogGovernanceEntity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
