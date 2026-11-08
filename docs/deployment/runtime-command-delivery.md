@@ -68,7 +68,7 @@ A normal heartbeat does not refresh inventory freshness. Consumers that need cap
 
 Deployment creation accepts an optional `requiredCapabilities` array. Each entry contains:
 
-- `componentId`: runtime component identifier
+- `minimumRuntimeVersion`: optional minimum Wayang runtime version (numeric dotted form)\n- `componentId`: runtime component identifier
 - `capability`: capability identifier
 - `minimumVersion`: optional numeric dotted version (for example `1.4.0`)
 
@@ -81,7 +81,7 @@ Example:
   "workflowId": "orders.process",
   "workflowVersion": "2.1.0",
   "artifactDigest": "sha256:<64-hex-digest>",
-  "manifestDigest": "sha256:<64-hex-digest>",
+  "manifestDigest": "sha256:<64-hex-digest>",\n  "minimumRuntimeVersion": "1.4.0",
   "requiredCapabilities": [
     { "componentId": "wayang.runtime", "capability": "workflow.execute", "minimumVersion": "1.4.0" },
     { "componentId": "wayang.connector.postgresql", "capability": "database.postgresql" }
