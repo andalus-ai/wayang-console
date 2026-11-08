@@ -47,7 +47,7 @@ class RuntimeCommandIntegrationTest {
         var repeated = commands.dispatch(organization, Set.of(environment), deployment.id(), "operator-test");
         assertEquals(command.commandId(), repeated.commandId());
         assertTrue(command.typedPayload().contains("sample.workflow"));
-        assertTrue(command.typedPayload().contains("\\\"minimumRuntimeVersion\\\":\\\"1.0.0\\\""));
+        assertTrue(command.typedPayload().contains("\"minimumRuntimeVersion\":\"1.0.0\""));
         assertTrue(command.typedPayload().contains("wayang.runtime"));
 
         var runtime = registry.authenticate(enrolled.registrationToken());
