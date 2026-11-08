@@ -15,8 +15,8 @@ import java.util.*;
 public class ArtifactRegistryService {
  @Inject ArtifactStorage storage;
  @Inject AuditIntegrityService audit;
- @ConfigProperty(name="wayang.console.artifacts.max-size-bytes",defaultValue="268435456") long maxBytes;
- @ConfigProperty(name="wayang.console.artifacts.ed25519-public-key",defaultValue="") String trustedPublicKey;
+ @Inject @ConfigProperty(name="wayang.console.artifacts.max-size-bytes",defaultValue="268435456") long maxBytes;
+ @Inject @ConfigProperty(name="wayang.console.artifacts.ed25519-public-key",defaultValue="") String trustedPublicKey;
  public record ArtifactView(UUID id,String artifactDigest,String manifestDigest,long sizeBytes,String signingKeyId,Instant createdAt){}
  public record Download(String digest,String manifestDigest,String signature,String signingKeyId,long sizeBytes,InputStream content){}
  @Transactional
