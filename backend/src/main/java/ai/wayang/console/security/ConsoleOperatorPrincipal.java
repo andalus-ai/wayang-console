@@ -23,4 +23,6 @@ public record ConsoleOperatorPrincipal(String subject, UUID organizationId,
     public boolean canAdminPluginCatalog() { return roles.contains("console:plugin-catalog:admin"); }
     public boolean canReadPublisherTrust() { return roles.contains("console:publisher-trust:read") || canAdminPublisherTrust(); }
     public boolean canAdminPublisherTrust() { return roles.contains("console:publisher-trust:admin"); }
+    public boolean canReadPluginApproval() { return roles.contains("console:plugin-approval:read") || canAdminPluginApproval(); }
+    public boolean canAdminPluginApproval() { return roles.contains("console:plugin-approval:admin"); }
 }
