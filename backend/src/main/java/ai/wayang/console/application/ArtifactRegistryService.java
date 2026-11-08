@@ -77,6 +77,17 @@ public class ArtifactRegistryService {
   validateDigest(digest,"artifactDigest");
   ArtifactEntity a=ArtifactEntity.find("organizationId = ?1 and environmentId = ?2 and artifactDigest = ?3",runtime.organizationId(),runtime.environmentId(),digest.toLowerCase()).firstResult();
   if(a==null)throw new NotFoundException("Artifact not found");
+  List<PluginCatalogEntryEntity> pluginEntries=PluginCatalogEntryEntity.list(
+   "organizationId = ?1 and environmentId = ?2 and manifestDigest = ?3",
+   runtime.organizationId(),runtime.environmentId(),a.manifestDigest);
+  for(PluginCatalogEntryEntity entry:pluginEntries){
+   PluginApprovalEntity approval=PluginApprovalEntity.find("catalogEntryId",entry.id).firstResult();
+   PluginCatalogGovernanceEntity governance=PluginCatalogGovernanceEntity.find("catalogEntryId",entry.id).firstResult();
+   if(approval==null||!"APPROVED".equals(approval.approvalStatus)
+     ||(governance!=null&&!"ACTIVE".equals(governance.lifecycleStatus)))
+    throw new WebApplicationException("Plugin artifact is not currently approved for distribution",403);
+  }
+  verify(runtime.organizationId(),runtime.environmentId(),a.artifactDigest,a.manifestDigest,a.signingKeyId,a.signature);
   try{return new Download(a.artifactDigest,a.manifestDigest,a.signature,a.signingKeyId,a.sizeBytes,storage.open(a.objectKey));}catch(IOException e){throw new WebApplicationException("Artifact storage unavailable",503);}
  }
  private void verify(UUID org,UUID env,String digest,String manifest,String keyId,String sig){
