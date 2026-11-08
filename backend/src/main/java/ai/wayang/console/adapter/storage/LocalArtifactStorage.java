@@ -17,7 +17,7 @@ public class LocalArtifactStorage implements ArtifactStorage {
   Files.createDirectories(dir); Path temp=Files.createTempFile(dir,".upload-",".part");
   try {
    MessageDigest md=MessageDigest.getInstance("SHA-256"); long size;
-   try(DigestInputStream in=new DigestInputStream(body,md)){ size=Files.copy(in,temp,StandardCopyOption.REPLACE_EXISTING); }
+   try(DigestInputStream in=new DigestInputStream(new BoundedInputStream(body,max),md)){ size=Files.copy(in,temp,StandardCopyOption.REPLACE_EXISTING); }
    if(size<1||size>max) throw new IOException("Artifact size is outside permitted range");
    String digest="sha256:"+HexFormat.of().formatHex(md.digest());
    if(!digest.equalsIgnoreCase(expected)) throw new IOException("Artifact digest mismatch");
@@ -31,7 +31,7 @@ public class LocalArtifactStorage implements ArtifactStorage {
  }
  public InputStream open(String key)throws IOException{return Files.newInputStream(resolve(key));}
  public void delete(String key)throws IOException{Files.deleteIfExists(resolve(key));}
- private Path resolve(String key)throws IOException{
+ private static final class BoundedInputStream extends FilterInputStream {\n  private final long max; private long count;\n  BoundedInputStream(InputStream in,long max){super(in);this.max=max;}\n  public int read()throws IOException{int value=super.read();if(value>=0&&++count>max)throw new IOException("Artifact exceeds configured size limit");return value;}\n  public int read(byte[] b,int off,int len)throws IOException{int n=super.read(b,off,(int)Math.min(len,max-count+1));if(n>0){count+=n;if(count>max)throw new IOException("Artifact exceeds configured size limit");}return n;}\n }\n private Path resolve(String key)throws IOException{
   if(key==null||!key.matches("[0-9a-fA-F-]{36}/[0-9a-fA-F-]{36}/[0-9a-f]{64}")) throw new IOException("Invalid object key");
   Path root=Path.of(configuredRoot).toAbsolutePath().normalize(), path=root.resolve(key).normalize();
   if(!path.startsWith(root))throw new IOException("Invalid object key"); return path;
