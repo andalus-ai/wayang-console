@@ -1,4 +1,5 @@
 package ai.wayang.console.application;
+
 import ai.wayang.console.adapter.persistence.ArtifactEntity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -6,15 +7,14 @@ import jakarta.transaction.Transactional;
 import jakarta.ws.rs.*;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import java.io.*;
-import java.nio.charset.StandardCharsets;
-import java.security.*;
-import java.security.spec.X509EncodedKeySpec;
 import java.time.Instant;
 import java.util.*;
+
 @ApplicationScoped
 public class ArtifactRegistryService {
  @Inject ArtifactStorage storage;
  @Inject AuditIntegrityService audit;
+ @Inject PublisherSigningKeyTrustService publisherTrust;
  @Inject @ConfigProperty(name="wayang.console.artifacts.max-size-bytes",defaultValue="268435456") long maxBytes;
  @Inject @ConfigProperty(name="wayang.console.artifacts.ed25519-public-key",defaultValue="") String trustedPublicKey;
  @Inject @ConfigProperty(name="wayang.console.artifacts.signing-key-id",defaultValue="") String trustedKeyId;
@@ -29,7 +29,7 @@ public class ArtifactRegistryService {
   ArtifactStorage.StoredObject stored;
   try{stored=storage.put(org,env,digest,content,maxBytes);}catch(IOException e){throw new WebApplicationException("Artifact upload failed: "+e.getMessage(),400);}
   try{
-   verify(stored.sha256(),manifest.toLowerCase(),keyId,signature);
+   verify(org,env,stored.sha256(),manifest.toLowerCase(),keyId,signature);
    Instant now=Instant.now();ArtifactEntity a=new ArtifactEntity();a.id=UUID.randomUUID();a.organizationId=org;a.environmentId=env;
    a.artifactDigest=stored.sha256();a.manifestDigest=manifest.toLowerCase();a.objectKey=stored.objectKey();a.sizeBytes=stored.sizeBytes();
    a.signature=signature;a.signingKeyId=keyId;a.uploadedBy=actor;a.createdAt=now;a.persist();
@@ -46,7 +46,10 @@ public class ArtifactRegistryService {
   if(a==null)throw new NotFoundException("Artifact not found");
   try{return new Download(a.artifactDigest,a.manifestDigest,a.signature,a.signingKeyId,a.sizeBytes,storage.open(a.objectKey));}catch(IOException e){throw new WebApplicationException("Artifact storage unavailable",503);}
  }
- private void verify(String digest,String manifest,String keyId,String sig){
+ private void verify(UUID org,UUID env,String digest,String manifest,String keyId,String sig){
+  PublisherSigningKeyTrustService.KeyVerification managed =
+      publisherTrust.verifyIfManaged(org,env,keyId,digest,manifest,sig);
+  if(managed != null) return;
   if(trustedKeyId==null||trustedKeyId.isBlank())throw new WebApplicationException("Artifact signing key id is not configured",503);
   if(!trustedKeyId.equals(keyId))throw new WebApplicationException("Artifact signing key id is not trusted",400);
   try{

@@ -24,6 +24,12 @@ public class ConsoleOperatorContext {
     public void requirePluginCatalogAdmin() {
         if (!principal().canAdminPluginCatalog()) throw new ForbiddenException("Plugin catalog administration permission is required");
     }
+    public void requirePublisherTrustRead() {
+        if (!principal().canReadPublisherTrust()) throw new ForbiddenException("Publisher trust read permission is required");
+    }
+    public void requirePublisherTrustAdmin() {
+        if (!principal().canAdminPublisherTrust()) throw new ForbiddenException("Publisher trust administration permission is required");
+    }
     public UUID requireEnvironment(String value) {
         if (value == null || value.isBlank()) {
             if (principal().environmentIds().size() == 1) return principal().environmentIds().iterator().next();
