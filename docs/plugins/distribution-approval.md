@@ -49,5 +49,5 @@ Roles:
 - Approval is scoped to one catalog version, organization and environment.
 - Manifest matching is exact; artifact digest and manifest digest are distinct values.
 - Signature verification is repeated at approval time so a revoked managed signing key cannot be used for a new approval.
-- Runtime download authorization must still enforce current governance and approval state. Approval alone must never become a public artifact URL.
+- Runtime downloads are gated through both the plugin-specific route and the generic artifact route whenever an artifact manifest is referenced by a catalog entry. Current governance, approval state, and publisher signature trust are rechecked at download time.
 - Database migration `014-plugin-distribution-approval` creates the current state and append-only event tables.
