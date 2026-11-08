@@ -32,13 +32,21 @@ public class DeploymentLifecycleService {
             String deploymentId, String workflowId, String workflowVersion, String artifactDigest,
             String manifestDigest, String actor) {
         return create(organizationId, environments, runtimeId, deploymentId, workflowId, workflowVersion,
-                artifactDigest, manifestDigest, List.of(), actor);
+                artifactDigest, manifestDigest, null, List.of(), actor);
     }
 
     @Transactional
     public DeploymentView create(UUID organizationId, Set<UUID> environments, UUID runtimeId,
             String deploymentId, String workflowId, String workflowVersion, String artifactDigest,
             String manifestDigest, List<CapabilityRequirement> requirements, String actor) {
+        return create(organizationId, environments, runtimeId, deploymentId, workflowId, workflowVersion,
+                artifactDigest, manifestDigest, null, requirements, actor);
+    }
+
+    @Transactional
+    public DeploymentView create(UUID organizationId, Set<UUID> environments, UUID runtimeId,
+            String deploymentId, String workflowId, String workflowVersion, String artifactDigest,
+            String manifestDigest, String minimumRuntimeVersion, List<CapabilityRequirement> requirements, String actor) {
         RuntimeInstanceEntity runtime = RuntimeInstanceEntity.findById(runtimeId, LockModeType.PESSIMISTIC_READ);
         if (runtime == null || !organizationId.equals(runtime.organizationId)
                 || environments == null || !environments.contains(runtime.environmentId))
@@ -49,9 +57,13 @@ public class DeploymentLifecycleService {
         digest(artifactDigest, "artifactDigest");
         digest(manifestDigest, "manifestDigest");
         if (requireRegisteredArtifact) artifacts.assertRegistered(organizationId, runtime.environmentId, artifactDigest, manifestDigest);
-        List<CapabilityRequirement> safeRequirements = requirements == null ? List.of() : List.copyOf(requirements);
+        String minimumRuntime = minimumRuntimeVersion == null || minimumRuntimeVersion.isBlank()
+                ? null : requiredBounded(minimumRuntimeVersion, 80, "minimumRuntimeVersion");
+        if (minimumRuntime != null && !minimumRuntime.matches("(?i)v?[0-9]+(?:\\\\.[0-9]+)*"))
+            throw new IllegalArgumentException("minimumRuntimeVersion must be a numeric dotted version");
+        List<CapabilityRequirement> safeRequirements = requirements == null ? List.of() : new java.util.ArrayList<>(requirements);
         if (safeRequirements.size() > 100) throw new IllegalArgumentException("At most 100 runtime capability requirements are allowed");
-        Set<String> requirementKeys = new HashSet<>();
+        Set<List<String>> requirementKeys = new HashSet<>();
         for (CapabilityRequirement requirement : safeRequirements) {
             if (requirement == null) throw new IllegalArgumentException("Capability requirement entries must not be null");
             String component = requiredBounded(requirement.componentId(), 180, "componentId");
@@ -60,7 +72,7 @@ public class DeploymentLifecycleService {
                     ? null : requiredBounded(requirement.minimumVersion(), 80, "minimumVersion");
             if (minimum != null && !minimum.matches("(?i)v?[0-9]+(?:\\.[0-9]+)*"))
                 throw new IllegalArgumentException("minimumVersion must be a numeric dotted version");
-            if (!requirementKeys.add(component.toLowerCase() + "|" + capability.toLowerCase()))
+            if (!requirementKeys.add(List.of(component.toLowerCase(java.util.Locale.ROOT), capability.toLowerCase(java.util.Locale.ROOT))))
                 throw new IllegalArgumentException("Duplicate capability requirement");
         }
         if (DeploymentEntity.find("organizationId = ?1 and environmentId = ?2 and deploymentId = ?3",
@@ -71,7 +83,7 @@ public class DeploymentLifecycleService {
         d.id = UUID.randomUUID(); d.deploymentId = deploymentId.trim(); d.organizationId = organizationId;
         d.environmentId = runtime.environmentId; d.runtimeId = runtime.id; d.workflowId = workflowId.trim();
         d.workflowVersion = workflowVersion.trim(); d.artifactDigest = artifactDigest.toLowerCase();
-        d.manifestDigest = manifestDigest.toLowerCase(); d.status = "REQUESTED"; d.requestedBy = required(actor, "actor");
+        d.manifestDigest = manifestDigest.toLowerCase(); d.minimumRuntimeVersion = minimumRuntime; d.status = "REQUESTED"; d.requestedBy = required(actor, "actor");
         d.createdAt = now; d.updatedAt = now; d.persist();
         for (CapabilityRequirement requirement : safeRequirements) {
             DeploymentCapabilityRequirementEntity entity = new DeploymentCapabilityRequirementEntity();
