@@ -31,6 +31,8 @@ public class PublisherSigningKeyTrustService {
     public record KeyView(String keyId, String fingerprint, String algorithm, String status,
             String createdBy, Instant createdAt, String revokedBy, Instant revokedAt, String revocationReason) {}
     public record KeyVerification(boolean managedTrustConfigured, String fingerprint) {}
+    public record KeyEvent(String keyId, String fingerprint, String eventType,
+            String actor, String reason, Instant occurredAt) {}
 
     @Transactional
     public KeyView register(UUID organizationId, UUID environmentId, String actor, RegisterCommand command) {
@@ -101,6 +103,19 @@ public class PublisherSigningKeyTrustService {
         audit.append(organizationId, environmentId, actor, "PUBLISHER_SIGNING_KEY_REVOKED",
                 "PUBLISHER_SIGNING_KEY", key.id.toString(), now, "SUCCESS");
         return view(key);
+    }
+
+    @Transactional
+    public List<KeyEvent> history(UUID organizationId, UUID environmentId, String keyId) {
+        boolean exists = PublisherSigningKeyEntity.count(
+                "organizationId = ?1 and environmentId = ?2 and keyId = ?3",
+                organizationId, environmentId, keyId) > 0;
+        if (!exists) throw new NotFoundException("Publisher signing key not found");
+        return PublisherSigningKeyEventEntity.<PublisherSigningKeyEventEntity>list(
+                "organizationId = ?1 and environmentId = ?2 and keyId = ?3 order by occurredAt, id",
+                organizationId, environmentId, keyId).stream()
+                .map(event -> new KeyEvent(event.keyId, event.fingerprint, event.eventType,
+                        event.actorSubject, event.reason, event.occurredAt)).toList();
     }
 
     /** Returns null only when no managed key has ever been configured for this scope. */
