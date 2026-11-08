@@ -35,3 +35,7 @@ Management APIs and events carry explicit versions. Runtime capability negotiati
 [Wayang Core](https://github.com/andalus-ai/wayang-core) is the canonical target for contracts shared with Wayang: component/plugin descriptors, portable manifests and schemas, capability vocabulary, and versioned management/worker protocols. Console owns its persistence entities, repositories, application services, REST resources, authorization and UI. It must not import Wayang workflow execution modules.
 
 The current protobuf under contracts/proto remains the compatibility baseline until its source is migrated to Core and both runtime and Console consumers are verified. Do not duplicate or independently evolve it. See [shared Core integration](shared-core-integration.md).
+
+## Plugin catalog boundary
+
+The versioned plugin catalog is a metadata projection, not runtime inventory, artifact storage, deployment state, or executable extension loading. See [plugin catalog contract](plugin-catalog.md).
