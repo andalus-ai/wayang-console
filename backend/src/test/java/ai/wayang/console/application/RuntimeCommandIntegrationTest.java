@@ -45,14 +45,19 @@ class RuntimeCommandIntegrationTest {
         assertEquals(command.commandId(), polled.commands().getFirst().commandId());
         assertEquals(1, polled.commands().getFirst().attemptCount());
 
-        var started = commands.acknowledge(runtime, command.commandId(), "STARTED", "accepted");
+        var started = commands.acknowledge(runtime, command.commandId(), "STARTED", "accepted", null);
         assertEquals("RUNNING", started.status());
-        var completed = commands.acknowledge(runtime, command.commandId(), "SUCCEEDED", "applied");
+        assertThrows(jakarta.ws.rs.WebApplicationException.class, () ->
+                commands.acknowledge(runtime, command.commandId(), "SUCCEEDED", "missing evidence", null));
+        assertThrows(jakarta.ws.rs.WebApplicationException.class, () ->
+                commands.acknowledge(runtime, command.commandId(), "SUCCEEDED", "wrong evidence",
+                        "sha256:" + "f".repeat(64)));
+        var completed = commands.acknowledge(runtime, command.commandId(), "SUCCEEDED", "applied", digest);
         assertTrue(completed.accepted());
         assertEquals("SUCCEEDED", completed.status());
         assertEquals("DEPLOYED", deployments.list(organization, Set.of(environment), 0, 10)
                 .items().getFirst().status());
-        assertTrue(commands.acknowledge(runtime, command.commandId(), "SUCCEEDED", "duplicate").accepted());
+        assertTrue(commands.acknowledge(runtime, command.commandId(), "SUCCEEDED", "duplicate", digest).accepted());
     }
 
     @Test
@@ -73,6 +78,6 @@ class RuntimeCommandIntegrationTest {
         var command = commands.dispatch(organization, Set.of(environment), deployment.id(), "operator-test");
         var otherRuntime = registry.authenticate(enrolledB.registrationToken());
         assertThrows(jakarta.ws.rs.NotFoundException.class, () ->
-                commands.acknowledge(otherRuntime, command.commandId(), "SUCCEEDED", "forged"));
+                commands.acknowledge(otherRuntime, command.commandId(), "SUCCEEDED", "forged", digest));
     }
 }

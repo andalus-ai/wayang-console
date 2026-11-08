@@ -28,7 +28,7 @@ public class RuntimeCommandService {
     public record CommandView(UUID commandId, String idempotencyKey, String commandType,
             String typedPayload, Instant expiresAt, int attemptCount) {}
     public record CommandPage(List<CommandView> commands) {}
-    public record AckView(UUID commandId, String status, boolean accepted, Instant completedAt) {}
+    public record AckView(UUID commandId, String status, boolean accepted, Instant completedAt, String verifiedArtifactDigest) {}
 
     @Transactional
     public CommandView dispatch(UUID organizationId, Set<UUID> environments,
@@ -105,7 +105,7 @@ public class RuntimeCommandService {
 
     @Transactional
     public AckView acknowledge(RuntimeRegistryService.AuthenticatedRuntime runtime,
-            UUID commandId, String requestedStatus, String message) {
+            UUID commandId, String requestedStatus, String message, String verifiedArtifactDigest) {
         ManagementCommandEntity command = ManagementCommandEntity.findById(commandId, LockModeType.PESSIMISTIC_WRITE);
         if (command == null || !command.runtimeId.equals(runtime.id())
                 || !command.organizationId.equals(runtime.organizationId())
@@ -119,12 +119,12 @@ public class RuntimeCommandService {
         if ("SUCCEEDED".equals(command.status) || "FAILED".equals(command.status) || "EXPIRED".equals(command.status)) {
             boolean same = ("SUCCEEDED".equals(status) && "SUCCEEDED".equals(command.status))
                     || ("FAILED".equals(status) && "FAILED".equals(command.status));
-            return new AckView(command.id, command.status, same, command.completedAt);
+            return new AckView(command.id, command.status, same, command.completedAt, command.verifiedArtifactDigest);
         }
         Instant now = Instant.now();
         if (!command.expiresAt.isAfter(now)) {
             expire(command, now, "Command expired before acknowledgement");
-            return new AckView(command.id, command.status, false, command.completedAt);
+            return new AckView(command.id, command.status, false, command.completedAt, command.verifiedArtifactDigest);
         }
         if ("STARTED".equals(status)) {
             if (!"LEASED".equals(command.status) && !"RUNNING".equals(command.status))
@@ -133,11 +133,20 @@ public class RuntimeCommandService {
             command.leaseUntil = now.plus(EXECUTION_LEASE);
             command.acknowledgedAt = command.acknowledgedAt == null ? now : command.acknowledgedAt;
             command.resultMessage = bounded(message, 1000);
-            return new AckView(command.id, command.status, true, null);
+            return new AckView(command.id, command.status, true, null, command.verifiedArtifactDigest);
         }
 
         if (!"LEASED".equals(command.status) && !"RUNNING".equals(command.status))
             throw new WebApplicationException("Command must be leased before completion", 409);
+        if ("SUCCEEDED".equals(status)) {
+            DeploymentEntity target = DeploymentEntity.findById(command.deploymentId, LockModeType.PESSIMISTIC_WRITE);
+            String verified = verifiedArtifactDigest == null ? "" : verifiedArtifactDigest.trim().toLowerCase();
+            if (target == null || !verified.matches("sha256:[0-9a-f]{64}")
+                    || !target.artifactDigest.equalsIgnoreCase(verified)) {
+                throw new WebApplicationException("Successful deployment acknowledgement must include the matching verified artifact digest", 409);
+            }
+            command.verifiedArtifactDigest = verified;
+        }
         command.status = status;
         command.completedAt = now;
         command.leaseUntil = null;
@@ -152,7 +161,7 @@ public class RuntimeCommandService {
         audit.append(command.organizationId, command.environmentId, "runtime:" + runtime.id(),
                 "DEPLOYMENT_COMMAND_" + status, "MANAGEMENT_COMMAND", command.id.toString(), now,
                 "FAILED".equals(status) ? "FAILURE" : "SUCCESS");
-        return new AckView(command.id, command.status, true, command.completedAt);
+        return new AckView(command.id, command.status, true, command.completedAt, command.verifiedArtifactDigest);
     }
 
     private static DeploymentEntity scopedDeployment(UUID organizationId, Set<UUID> environments,

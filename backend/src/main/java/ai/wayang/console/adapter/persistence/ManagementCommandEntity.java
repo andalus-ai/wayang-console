@@ -29,4 +29,5 @@ public class ManagementCommandEntity extends PanacheEntityBase {
     @Column(name = "acknowledged_at") public Instant acknowledgedAt;
     @Column(name = "completed_at") public Instant completedAt;
     @Column(name = "result_message", length = 1000) public String resultMessage;
+    @Column(name = "verified_artifact_digest", length = 71) public String verifiedArtifactDigest;
 }
