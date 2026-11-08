@@ -83,7 +83,7 @@ public class DeploymentLifecycleService {
             case "REQUESTED" -> next.equals("VALIDATING") || next.equals("CANCELLED") || next.equals("FAILED");
             case "VALIDATING" -> next.equals("READY") || next.equals("FAILED") || next.equals("CANCELLED");
             case "READY" -> next.equals("DEPLOYING") || next.equals("CANCELLED") || next.equals("FAILED");
-            case "DEPLOYING" -> next.equals("DEPLOYED") || next.equals("FAILED") || next.equals("ROLLING_BACK");
+            case "DEPLOYING" -> next.equals("FAILED") || next.equals("ROLLING_BACK");
             case "DEPLOYED" -> next.equals("ROLLING_BACK");
             case "ROLLING_BACK" -> next.equals("ROLLED_BACK") || next.equals("FAILED");
             default -> false;

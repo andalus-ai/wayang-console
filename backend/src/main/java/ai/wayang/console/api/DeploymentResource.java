@@ -1,6 +1,6 @@
 package ai.wayang.console.api;
 
-import ai.wayang.console.application.DeploymentLifecycleService;
+import ai.wayang.console.application.RuntimeCommandService;
 import ai.wayang.console.security.ConsoleOperatorContext;
 import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
@@ -14,13 +14,14 @@ import java.util.UUID;
 @Produces(MediaType.APPLICATION_JSON)
 public class DeploymentResource {
     @Inject ConsoleOperatorContext operator;
-    @Inject DeploymentLifecycleService deployments;
+    @Inject ai.wayang.console.application.DeploymentLifecycleService deployments;
+    @Inject RuntimeCommandService commands;
 
     public record CreateRequest(UUID runtimeId, String deploymentId, String workflowId,
             String workflowVersion, String artifactDigest, String manifestDigest) {}
 
     @POST
-    public DeploymentLifecycleService.DeploymentView create(CreateRequest request) {
+    public ai.wayang.console.application.DeploymentLifecycleService.DeploymentView create(CreateRequest request) {
         operator.requireAdmin();
         if (request == null) throw new BadRequestException("Request body is required");
         return deployments.create(operator.organizationId(), operator.environmentIds(), request.runtimeId(),
@@ -29,8 +30,8 @@ public class DeploymentResource {
     }
 
     @GET
-    public DeploymentLifecycleService.DeploymentPage list(@DefaultValue("0") @QueryParam("page") int page,
-            @DefaultValue("25") @QueryParam("size") int size) {
+    public ai.wayang.console.application.DeploymentLifecycleService.DeploymentPage list(
+            @DefaultValue("0") @QueryParam("page") int page, @DefaultValue("25") @QueryParam("size") int size) {
         operator.requireRead();
         return deployments.list(operator.organizationId(), operator.environmentIds(), page, size);
     }
@@ -39,11 +40,18 @@ public class DeploymentResource {
 
     @POST
     @Path("/{deploymentId}/transition")
-    public DeploymentLifecycleService.DeploymentView transition(@PathParam("deploymentId") UUID deploymentId,
-            TransitionRequest request) {
+    public ai.wayang.console.application.DeploymentLifecycleService.DeploymentView transition(
+            @PathParam("deploymentId") UUID deploymentId, TransitionRequest request) {
         operator.requireAdmin();
         if (request == null) throw new BadRequestException("Request body is required");
         return deployments.transition(operator.organizationId(), operator.environmentIds(), deploymentId,
                 request.status(), request.failureReason(), operator.subject());
+    }
+
+    @POST
+    @Path("/{deploymentId}/dispatch")
+    public RuntimeCommandService.CommandView dispatch(@PathParam("deploymentId") UUID deploymentId) {
+        operator.requireAdmin();
+        return commands.dispatch(operator.organizationId(), operator.environmentIds(), deploymentId, operator.subject());
     }
 }

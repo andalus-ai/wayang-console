@@ -189,3 +189,48 @@ databaseChangeLog:
               - column: { name: created_at }
       rollback:
         - dropTable: { tableName: wc_deployment }
+
+  - changeSet:
+      id: 005-runtime-command-delivery
+      author: andalus-ai
+      changes:
+        - createTable:
+            tableName: wc_management_command
+            columns:
+              - column: { name: id, type: UUID, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: runtime_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: organization_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: environment_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: deployment_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: idempotency_key, type: VARCHAR(220), constraints: { nullable: false } }
+              - column: { name: command_type, type: VARCHAR(64), constraints: { nullable: false } }
+              - column: { name: typed_payload, type: TEXT, constraints: { nullable: false } }
+              - column: { name: status, type: VARCHAR(24), constraints: { nullable: false } }
+              - column: { name: attempt_count, type: INT, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: max_attempts, type: INT, defaultValueNumeric: 12, constraints: { nullable: false } }
+              - column: { name: created_at, type: TIMESTAMP WITH TIME ZONE, constraints: { nullable: false } }
+              - column: { name: expires_at, type: TIMESTAMP WITH TIME ZONE, constraints: { nullable: false } }
+              - column: { name: lease_until, type: TIMESTAMP WITH TIME ZONE }
+              - column: { name: last_delivered_at, type: TIMESTAMP WITH TIME ZONE }
+              - column: { name: acknowledged_at, type: TIMESTAMP WITH TIME ZONE }
+              - column: { name: completed_at, type: TIMESTAMP WITH TIME ZONE }
+              - column: { name: result_message, type: VARCHAR(1000) }
+        - addUniqueConstraint:
+            tableName: wc_management_command
+            columnNames: idempotency_key
+            constraintName: uk_wc_command_idempotency
+        - createIndex:
+            tableName: wc_management_command
+            indexName: idx_wc_command_runtime_delivery
+            columns:
+              - column: { name: runtime_id }
+              - column: { name: status }
+              - column: { name: lease_until }
+              - column: { name: created_at }
+        - createIndex:
+            tableName: wc_management_command
+            indexName: idx_wc_command_deployment
+            columns:
+              - column: { name: deployment_id }
+      rollback:
+        - dropTable: { tableName: wc_management_command }

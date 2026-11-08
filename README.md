@@ -56,3 +56,9 @@ Backend requirements and commands are documented in [backend/README.md](backend/
 - Console now tracks scoped deployment records, artifact/manifest digests, and guarded lifecycle transitions.
 - Deployment lifecycle APIs are management metadata only; runtime command delivery, artifact signature verification, and desired/observed reconciliation remain subsequent work.
 - See [deployment lifecycle](docs/deployment/deployment-lifecycle.md).
+
+
+### M1.7 runtime command delivery
+
+- Adds durable, idempotent deployment command dispatch, runtime polling leases, authenticated acknowledgements, and deployment status reconciliation.
+- Delivery is at-least-once; runtime consumers must deduplicate commands by stable command ID/idempotency key. Artifact transfer and signature verification remain separate follow-up work.
