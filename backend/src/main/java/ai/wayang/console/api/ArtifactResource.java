@@ -22,7 +22,8 @@ public class ArtifactResource {
   String token=bearer(authorization);if(token==null)return unauthorized();
   try{var runtime=runtimes.authenticate(token);var a=artifacts.openForRuntime(runtime,digest);
    StreamingOutput body=out->{try(InputStream in=a.content()){in.transferTo(out);}};
-   return Response.ok(body).header("Content-Length",a.sizeBytes()).header("X-Artifact-Digest",a.digest()).build();
+   return Response.ok(body).header("Content-Length",a.sizeBytes()).header("X-Artifact-Digest",a.digest()).header("X-Manifest-Digest",a.manifestDigest())
+    .header("X-Artifact-Signature",a.signature()).header("X-Signing-Key-Id",a.signingKeyId()).build();
   }catch(SecurityException e){return unauthorized();}
  }
  private static Response unauthorized(){return Response.status(401).entity("Runtime credential invalid or expired").build();}
