@@ -1,6 +1,7 @@
 package ai.wayang.console.application;
 
 import ai.wayang.console.adapter.persistence.DeploymentEntity;
+import ai.wayang.console.adapter.persistence.DeploymentCapabilityRequirementEntity;
 import ai.wayang.console.adapter.persistence.ManagementCommandEntity;
 import ai.wayang.console.adapter.persistence.RuntimeInstanceEntity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -204,7 +205,13 @@ public class RuntimeCommandService {
         return "{\"deploymentRecordId\":\"" + d.id + "\",\"deploymentId\":\"" + escape(d.deploymentId)
                 + "\",\"workflowId\":\"" + escape(d.workflowId) + "\",\"workflowVersion\":\""
                 + escape(d.workflowVersion) + "\",\"artifactDigest\":\"" + escape(d.artifactDigest)
-                + "\",\"manifestDigest\":\"" + escape(d.manifestDigest) + "\",\"artifactUri\":\"/api/v1/runtime/artifacts/" + escape(d.artifactDigest) + "\"}";
+                + "\",\"manifestDigest\":\"" + escape(d.manifestDigest) + "\",\"artifactUri\":\"/api/v1/runtime/artifacts/" + escape(d.artifactDigest)
+                + "\",\"minimumRuntimeVersion\":" + (d.minimumRuntimeVersion == null ? "null" : "\"" + escape(d.minimumRuntimeVersion) + "\"")
+                + ",\"requiredCapabilities\":[" + DeploymentCapabilityRequirementEntity.<DeploymentCapabilityRequirementEntity>list("deploymentId", d.id)
+                    .stream().map(requirement -> "{\"componentId\":\"" + escape(requirement.componentId)
+                            + "\",\"capability\":\"" + escape(requirement.capability)
+                            + "\",\"minimumVersion\":" + (requirement.minimumVersion == null ? "null" : "\"" + escape(requirement.minimumVersion) + "\"") + "}")
+                    .collect(java.util.stream.Collectors.joining(",")) + "]}";
     }
     private static String escape(String value) {
         return value.replace("\\", "\\\\").replace("\"", "\\\"")
