@@ -44,6 +44,10 @@ public class RuntimeCompatibilityEvaluator {
         if (!"ONLINE".equalsIgnoreCase(runtime.status) || runtime.leaseExpiresAt == null || !runtime.leaseExpiresAt.isAfter(now)) {
             diagnostics.add(new Diagnostic("RUNTIME_OFFLINE", "The target runtime is offline or its lease has expired"));
         }
+        if (deployment.minimumRuntimeVersion != null && !atLeast(runtime.runtimeVersion, deployment.minimumRuntimeVersion)) {
+            diagnostics.add(new Diagnostic("RUNTIME_VERSION_UNSUPPORTED",
+                    "Runtime version " + runtime.runtimeVersion + " does not satisfy minimum " + deployment.minimumRuntimeVersion));
+        }
         if (runtime.inventoryRevision == null || runtime.inventoryReportedAt == null) {
             diagnostics.add(new Diagnostic("INVENTORY_UNKNOWN", "The runtime has not reported a capability inventory"));
         } else if (runtime.inventoryReportedAt.isBefore(now.minus(MAX_INVENTORY_AGE))) {
