@@ -344,7 +344,8 @@ databaseChangeLog:
               - column: { name: updated_at }
       rollback:
         - dropTable: { tableName: wc_deployment_reconciliation }
-      id: 010-versioned-plugin-catalog
+  - changeSet:
+      id: 011-versioned-plugin-catalog
       author: andalus-ai
       changes:
         - createTable:
@@ -376,7 +377,7 @@ databaseChangeLog:
         - dropTable: { tableName: wc_plugin_catalog_entry }
 
   - changeSet:
-      id: 011-plugin-catalog-governance
+      id: 012-plugin-catalog-governance
       author: andalus-ai
       changes:
         - createTable:
@@ -421,7 +422,7 @@ databaseChangeLog:
         - dropTable: { tableName: wc_plugin_catalog_governance }
 
   - changeSet:
-      id: 012-publisher-signing-key-trust
+      id: 013-publisher-signing-key-trust
       author: andalus-ai
       changes:
         - createTable:
