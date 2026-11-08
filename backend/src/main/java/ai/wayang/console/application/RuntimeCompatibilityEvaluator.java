@@ -12,7 +12,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
@@ -20,7 +19,6 @@ import java.util.UUID;
 public class RuntimeCompatibilityEvaluator {
     private static final Duration MAX_INVENTORY_AGE = Duration.ofMinutes(5);
 
-    public record Requirement(String componentId, String capability, String minimumVersion) {}
     public record Diagnostic(String code, String message) {}
     public record Evaluation(boolean compatible, UUID deploymentId, UUID runtimeId,
             String inventoryRevision, Instant inventoryReportedAt, List<Diagnostic> diagnostics) {}
