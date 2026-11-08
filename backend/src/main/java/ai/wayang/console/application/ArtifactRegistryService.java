@@ -18,7 +18,7 @@ public class ArtifactRegistryService {
  @ConfigProperty(name="wayang.console.artifacts.max-size-bytes",defaultValue="268435456") long maxBytes;
  @ConfigProperty(name="wayang.console.artifacts.ed25519-public-key",defaultValue="") String trustedPublicKey;
  public record ArtifactView(UUID id,String artifactDigest,String manifestDigest,long sizeBytes,String signingKeyId,Instant createdAt){}
- public record Download(String digest,long sizeBytes,InputStream content){}
+ public record Download(String digest,String manifestDigest,String signature,String signingKeyId,long sizeBytes,InputStream content){}
  @Transactional
  public ArtifactView register(UUID org,UUID env,String actor,String digest,String manifest,String keyId,String signature,InputStream content){
   validateDigest(digest,"artifactDigest");validateDigest(manifest,"manifestDigest");required(keyId,"keyId");required(signature,"signature");
@@ -43,7 +43,7 @@ public class ArtifactRegistryService {
   validateDigest(digest,"artifactDigest");
   ArtifactEntity a=ArtifactEntity.find("organizationId = ?1 and environmentId = ?2 and artifactDigest = ?3",runtime.organizationId(),runtime.environmentId(),digest.toLowerCase()).firstResult();
   if(a==null)throw new NotFoundException("Artifact not found");
-  try{return new Download(a.artifactDigest,a.sizeBytes,storage.open(a.objectKey));}catch(IOException e){throw new WebApplicationException("Artifact storage unavailable",503);}
+  try{return new Download(a.artifactDigest,a.manifestDigest,a.signature,a.signingKeyId,a.sizeBytes,storage.open(a.objectKey));}catch(IOException e){throw new WebApplicationException("Artifact storage unavailable",503);}
  }
  private void verify(String digest,String manifest,String keyId,String sig){
   if(trustedPublicKey==null||trustedPublicKey.isBlank())throw new WebApplicationException("Artifact signing trust is not configured",503);
