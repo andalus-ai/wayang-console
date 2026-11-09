@@ -180,6 +180,79 @@ public class RuntimeCommandService {
         return new AckView(command.id, command.status, true, command.completedAt, command.verifiedArtifactDigest);
     }
 
+
+    @Transactional
+    public boolean dispatchDueRetry(UUID deploymentId, Instant now) {
+        DeploymentEntity deployment = DeploymentEntity.findById(deploymentId, LockModeType.PESSIMISTIC_WRITE);
+        DeploymentReconciliationEntity reconciliation = DeploymentReconciliationEntity
+                .<DeploymentReconciliationEntity>find("deploymentId", deploymentId)
+                .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
+        if (reconciliation == null || !"RETRYING".equals(reconciliation.reconciliationState)
+                || reconciliation.nextAttemptAt == null || reconciliation.nextAttemptAt.isAfter(now)) return false;
+        if (deployment == null || !"PRESENT".equals(reconciliation.desiredState) || deployment.runtimeId == null) {
+            reconciliation.reconciliationState = "MANUAL_INTERVENTION";
+            reconciliation.nextAttemptAt = null;
+            reconciliation.diagnostic = "Retry cannot be dispatched because the deployment or target runtime is unavailable";
+            reconciliation.updatedAt = now;
+            return false;
+        }
+        List<ManagementCommandEntity> active = ManagementCommandEntity.list(
+                "deploymentId = ?1 and status in ('PENDING','LEASED','RUNNING')", deploymentId);
+        if (!active.isEmpty()) {
+            reconciliation.nextAttemptAt = now.plusSeconds(30);
+            reconciliation.diagnostic = "Retry deferred while an earlier command remains active";
+            reconciliation.updatedAt = now;
+            return false;
+        }
+        RuntimeCompatibilityEvaluator.Evaluation evaluation = compatibility.evaluate(deployment);
+        if (!evaluation.compatible()) {
+            String diagnostics = evaluation.diagnostics().stream()
+                    .map(diagnostic -> diagnostic.code() + ": " + diagnostic.message())
+                    .collect(java.util.stream.Collectors.joining("; "));
+            reconciliation.reconciliationState = "MANUAL_INTERVENTION";
+            reconciliation.nextAttemptAt = null;
+            reconciliation.diagnostic = "Runtime is no longer compatible: " + bounded(diagnostics, 900);
+            reconciliation.updatedAt = now;
+            return false;
+        }
+        String idempotencyKey = "deployment:" + deployment.id + ":generation:" + reconciliation.generation
+                + ":retry:" + reconciliation.retryCount + ":apply:v1";
+        ManagementCommandEntity existing = ManagementCommandEntity.find("idempotencyKey", idempotencyKey).firstResult();
+        if (existing != null) {
+            reconciliation.nextAttemptAt = now.plusSeconds(30);
+            reconciliation.diagnostic = "Retry command already exists; waiting for its terminal result";
+            reconciliation.updatedAt = now;
+            return false;
+        }
+        ManagementCommandEntity command = new ManagementCommandEntity();
+        command.id = UUID.randomUUID();
+        command.runtimeId = deployment.runtimeId;
+        command.organizationId = deployment.organizationId;
+        command.environmentId = deployment.environmentId;
+        command.deploymentId = deployment.id;
+        command.idempotencyKey = idempotencyKey;
+        command.commandType = "APPLY_DEPLOYMENT";
+        command.typedPayload = payload(deployment, reconciliation.generation, reconciliation.retryCount);
+        command.status = "PENDING";
+        command.attemptCount = 0;
+        command.maxAttempts = MAX_ATTEMPTS;
+        command.createdAt = now;
+        command.expiresAt = now.plus(COMMAND_TTL);
+        command.persist();
+        deployment.status = "DEPLOYING";
+        deployment.updatedAt = now;
+        deployment.completedAt = null;
+        deployment.failureReason = null;
+        reconciliation.reconciliationState = "WAITING_RUNTIME";
+        reconciliation.nextAttemptAt = null;
+        reconciliation.lastAttemptAt = now;
+        reconciliation.diagnostic = "Automatic retry " + reconciliation.retryCount + " queued";
+        reconciliation.updatedAt = now;
+        audit.append(deployment.organizationId, deployment.environmentId, "console:reconciliation-worker",
+                "DEPLOYMENT_RETRY_QUEUED", "MANAGEMENT_COMMAND", command.id.toString(), now, "SUCCESS");
+        return true;
+    }
+
     private static DeploymentEntity scopedDeployment(UUID organizationId, Set<UUID> environments,
             UUID deploymentId, boolean lock) {
         DeploymentEntity d = lock
@@ -209,6 +282,10 @@ public class RuntimeCommandService {
     }
 
     private static String payload(DeploymentEntity d, long generation) {
+        return payload(d, generation, 0);
+    }
+
+    private static String payload(DeploymentEntity d, long generation, int retryAttempt) {
         List<DeploymentCapabilityRequirementEntity> requirements =
                 DeploymentCapabilityRequirementEntity.list("deploymentId", d.id);
         String requirementsJson = requirements.stream()
