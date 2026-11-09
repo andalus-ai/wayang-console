@@ -1,6 +1,6 @@
 package ai.wayang.console.application;
 
-import jakarta.ws.rs.ConflictException;
+import ai.wayang.console.application.ConflictException;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
