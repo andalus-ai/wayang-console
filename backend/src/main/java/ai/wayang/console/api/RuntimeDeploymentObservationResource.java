@@ -17,7 +17,7 @@ public class RuntimeDeploymentObservationResource {
     @Inject DeploymentReconciliationService reconciliation;
 
     public record ObservationRequest(String state, String artifactDigest, UUID commandId,
-            long sequence, Instant observedAt, String diagnostic) {}
+            long generation, long sequence, Instant observedAt, String diagnostic) {}
 
     @POST
     @Path("/{deploymentId}/observed-state")
@@ -29,7 +29,7 @@ public class RuntimeDeploymentObservationResource {
         try {
             var runtime = registry.authenticate(token);
             var result = reconciliation.report(runtime, deploymentId, new DeploymentReconciliationService.Observation(
-                    request.state(), request.artifactDigest(), request.commandId(), request.sequence(),
+                    request.state(), request.artifactDigest(), request.commandId(), request.generation(), request.sequence(),
                     request.observedAt(), request.diagnostic()));
             return Response.ok(result).build();
         } catch (SecurityException e) {
