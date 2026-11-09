@@ -526,3 +526,27 @@ databaseChangeLog:
       rollback:
         - dropTable: { tableName: wc_plugin_approval_event }
         - dropTable: { tableName: wc_plugin_approval }
+
+  - changeSet:
+      id: 015-deployment-reconciliation-retry-schedule
+      author: andalus-ai
+      changes:
+        - addColumn:
+            tableName: wc_deployment_reconciliation
+            columns:
+              - column: { name: retry_count, type: INT, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: next_attempt_at, type: TIMESTAMP WITH TIME ZONE }
+              - column: { name: last_attempt_at, type: TIMESTAMP WITH TIME ZONE }
+        - createIndex:
+            tableName: wc_deployment_reconciliation
+            indexName: idx_wc_reconciliation_retry_due
+            columns:
+              - column: { name: reconciliation_state }
+              - column: { name: next_attempt_at }
+      rollback:
+        - dropIndex:
+            tableName: wc_deployment_reconciliation
+            indexName: idx_wc_reconciliation_retry_due
+        - dropColumn: { tableName: wc_deployment_reconciliation, columnName: last_attempt_at }
+        - dropColumn: { tableName: wc_deployment_reconciliation, columnName: next_attempt_at }
+        - dropColumn: { tableName: wc_deployment_reconciliation, columnName: retry_count }

@@ -23,4 +23,7 @@ public class DeploymentReconciliationEntity extends PanacheEntityBase {
     @Column(name = "reconciliation_state", nullable = false, length = 32) public String reconciliationState;
     @Column(length = 1000) public String diagnostic;
     @Column(name = "updated_at", nullable = false) public Instant updatedAt;
+    @Column(name = "retry_count", nullable = false) public int retryCount;
+    @Column(name = "next_attempt_at") public Instant nextAttemptAt;
+    @Column(name = "last_attempt_at") public Instant lastAttemptAt;
 }
