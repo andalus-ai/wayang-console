@@ -294,7 +294,7 @@ public class RuntimeCommandService {
                         + "\",\"minimumVersion\":" + (requirement.minimumVersion == null
                                 ? "null" : "\"" + escape(requirement.minimumVersion) + "\"") + "}")
                 .collect(java.util.stream.Collectors.joining(","));
-        return "{\"deploymentRecordId\":\"" + d.id + "\",\"generation\":" + generation + ",\"deploymentId\":\"" + escape(d.deploymentId)
+        return "{\"deploymentRecordId\":\"" + d.id + "\",\"generation\":" + generation + ",\"retryAttempt\":" + retryAttempt + ",\"deploymentId\":\"" + escape(d.deploymentId)
                 + "\",\"workflowId\":\"" + escape(d.workflowId) + "\",\"workflowVersion\":\""
                 + escape(d.workflowVersion) + "\",\"artifactDigest\":\"" + escape(d.artifactDigest)
                 + "\",\"manifestDigest\":\"" + escape(d.manifestDigest)
