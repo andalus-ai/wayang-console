@@ -9,7 +9,6 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.BadRequestException;
-import jakarta.ws.rs.ConflictException;
 import jakarta.ws.rs.NotFoundException;
 import java.time.Instant;
 import java.util.List;
