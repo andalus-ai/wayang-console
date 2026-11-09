@@ -1,6 +1,6 @@
 package ai.wayang.console.application;
 
-import ai.wayang.console.application.ConflictException;
+import jakarta.ws.rs.WebApplicationException;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -27,17 +27,21 @@ class PluginCatalogGovernanceServiceTest {
 
     @Test
     void invalidTransitionsAreRejected() {
-        assertThrows(ConflictException.class, () -> PluginCatalogGovernanceService.target(
+        assertConflict(() -> PluginCatalogGovernanceService.target(
                 PluginCatalogGovernanceService.Status.REVOKED, PluginCatalogGovernanceService.Action.REACTIVATE));
-        assertThrows(ConflictException.class, () -> PluginCatalogGovernanceService.target(
+        assertConflict(() -> PluginCatalogGovernanceService.target(
                 PluginCatalogGovernanceService.Status.REVOKED, PluginCatalogGovernanceService.Action.DEPRECATE));
-        assertThrows(ConflictException.class, () -> PluginCatalogGovernanceService.target(
+        assertConflict(() -> PluginCatalogGovernanceService.target(
                 PluginCatalogGovernanceService.Status.DEPRECATED, PluginCatalogGovernanceService.Action.DEPRECATE));
     }
 
     @Test
     void revokedIsTerminal() {
-        assertThrows(ConflictException.class, () -> PluginCatalogGovernanceService.target(
+        assertConflict(() -> PluginCatalogGovernanceService.target(
                 PluginCatalogGovernanceService.Status.REVOKED, PluginCatalogGovernanceService.Action.REVOKE));
+    }
+    private static void assertConflict(Runnable action) {
+        WebApplicationException exception = assertThrows(WebApplicationException.class, action::run);
+        assertEquals(409, exception.getResponse().getStatus());
     }
 }

@@ -8,6 +8,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.NotFoundException;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
@@ -54,15 +55,15 @@ public class PublisherSigningKeyTrustService {
                 organizationId, environmentId, command.keyId()).firstResult();
         if (existing != null) {
             if (!existing.fingerprint.equals(fingerprint))
-                throw new ConflictException("keyId is already bound to a different public key; use a new keyId");
+                throw new WebApplicationException("keyId is already bound to a different public key; use a new keyId", 409);
             if ("REVOKED".equals(existing.keyStatus))
-                throw new ConflictException("A revoked key cannot be reactivated; register a new keyId");
+                throw new WebApplicationException("A revoked key cannot be reactivated; register a new keyId", 409);
             return view(existing);
         }
         if (PublisherSigningKeyEntity.count(
                 "organizationId = ?1 and environmentId = ?2 and fingerprint = ?3",
                 organizationId, environmentId, fingerprint) > 0)
-            throw new ConflictException("This public key is already registered under another keyId");
+            throw new WebApplicationException("This public key is already registered under another keyId", 409);
 
         Instant now = Instant.now();
         PublisherSigningKeyEntity key = new PublisherSigningKeyEntity();
@@ -94,7 +95,7 @@ public class PublisherSigningKeyTrustService {
         key = entityManager.find(PublisherSigningKeyEntity.class, key.id, LockModeType.PESSIMISTIC_WRITE);
         if ("REVOKED".equals(key.keyStatus)) {
             if (reason.equals(key.revocationReason)) return view(key);
-            throw new ConflictException("Signing key is already revoked");
+            throw new WebApplicationException("Signing key is already revoked", 409);
         }
         Instant now = Instant.now();
         key.keyStatus = "REVOKED"; key.revokedBy = actor; key.revokedAt = now; key.revocationReason = reason;

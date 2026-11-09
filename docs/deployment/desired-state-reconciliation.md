@@ -1,6 +1,6 @@
 # M1.10 — Runtime desired-state reconciliation
 
-Status: proposal for implementation; this document does not claim that the reconciliation API or worker is implemented.
+Status: partially implemented. Desired-state persistence, authenticated runtime observations, monotonic report sequencing, generation-aware dispatch, and generation-safe observation validation exist. Retry scheduling, automated remediation, and worker recovery remain future work.
 
 ## Purpose
 
@@ -26,13 +26,14 @@ Do not derive desired state solely from the existing lifecycle status. Migration
 Add an authenticated runtime report endpoint, scoped by runtime identity and organization/environment. Reports include:
 
 - deployment record ID and deployment identifier;
+- the current desired-state `generation` (required; a missing or mismatched generation is rejected with HTTP 409);
 - observed state;
 - artifact digest actually loaded (or null when absent);
 - command ID and idempotency key last applied;
 - runtime-generated observation time and monotonically increasing report sequence;
 - optional bounded diagnostic code/message.
 
-The server must use the authenticated runtime's identity for scope checks, not caller-supplied organization/environment. Reject reports for deployments assigned to another runtime. Make repeated reports idempotent; older sequence numbers must not overwrite newer observed state. Validate digest format and bound diagnostic fields.
+The server must use the authenticated runtime's identity for scope checks, not caller-supplied organization/environment. Reject reports for deployments assigned to another runtime. Make repeated reports idempotent; older sequence numbers must not overwrite newer observed state. The observation generation must exactly match the current desired-state generation. Reject an observation from an older or unknown future generation with HTTP 409 before mutating observed state or audit state. Validate digest format and bound diagnostic fields.
 
 Runtime reports are evidence from the authenticated runtime, not independent attestation. Console should preserve the report timestamp and receipt timestamp separately.
 
@@ -54,8 +55,8 @@ Do not automatically stop or remove workloads in the first slice. Drift detectio
 - Use a transactional outbox for commands created by reconciliation; command row and outbox row commit together.
 - Stable idempotency key: deployment ID + desired-state generation + action.
 - Lock deployment rows during generation changes and reconciliation decisions.
-- Increment desired-state generation on operator change; reports and commands carry generation.
-- Ignore reports/acks from older generations for current-state decisions, while retaining audit evidence.
+- Increment desired-state generation on operator change; apply command payloads and runtime observations carry generation.
+- Reject observations from older/future generations for current-state decisions; stale reports are not allowed to mutate the current observed-state row.
 - Bounded retry policy with exponential backoff and jitter; cap attempts. After exhaustion set MANUAL_INTERVENTION and preserve the last diagnostic.
 - Reconciliation must be safe to run repeatedly and after process restart.
 - Never hold a database transaction while making network calls to Runtime.
@@ -84,9 +85,9 @@ Append audit events for desired-state changes, accepted/ignored runtime reports,
 ## Implementation sequence
 
 1. Migration and persistence model for desired/observed/reconciliation fields and generation.
-2. Runtime report DTO/resource/service with scope validation, ordering, and audit.
+2. Runtime report DTO/resource/service with scope validation, ordering, generation matching, and audit. (Implemented.)
 3. Reconciliation evaluator (pure decision function) with unit tests.
-4. Durable outbox and idempotent command scheduling.
+4. Reuse the durable management-command queue and idempotent generation-aware command scheduling; do not introduce a duplicate outbox without a separate durability requirement. (Apply dispatch implemented.)
 5. Scoped operator status endpoint.
 6. Retry worker, backoff, restart recovery, and integration tests.
 7. Only then add opt-in apply/rollback remediation actions.
