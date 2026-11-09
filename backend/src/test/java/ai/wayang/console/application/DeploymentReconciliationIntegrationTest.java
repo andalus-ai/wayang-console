@@ -126,8 +126,8 @@ class DeploymentReconciliationIntegrationTest {
         assertNull(row.nextAttemptAt);
         assertEquals(1, row.retryCount);
         assertNotNull(row.lastAttemptAt);
-        var retryCommand = ai.wayang.console.adapter.persistence.ManagementCommandEntity
-                .find("idempotencyKey", "deployment:" + deployment.id + ":generation:1:retry:1:apply:v1").firstResult();
+        ai.wayang.console.adapter.persistence.ManagementCommandEntity retryCommand = ai.wayang.console.adapter.persistence.ManagementCommandEntity
+                .find("idempotencyKey", "deployment:" + deployment.id() + ":generation:1:retry:1:apply:v1").firstResult();
         assertNotNull(retryCommand);
         assertTrue(retryCommand.typedPayload.contains("\"generation\":1"));
         assertTrue(retryCommand.typedPayload.contains("\"retryAttempt\":1"));
