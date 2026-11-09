@@ -9,7 +9,7 @@ import jakarta.persistence.EntityManager;
 import jakarta.persistence.LockModeType;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.BadRequestException;
-import jakarta.ws.rs.ConflictException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.NotFoundException;
 import java.time.Instant;
 import java.util.List;
@@ -67,7 +67,7 @@ public class PluginCatalogGovernanceService {
         Status to = target(from, command.action());
         if (from == to) {
             if (java.util.Objects.equals(state.reason, reason)) return view(state);
-            throw new ConflictException("Repeated lifecycle action must use the existing reason");
+            throw new WebApplicationException("Repeated lifecycle action must use the existing reason");
         }
 
         Instant now = Instant.now();
@@ -107,15 +107,15 @@ public class PluginCatalogGovernanceService {
     static Status target(Status from, Action action) {
         return switch (action) {
             case DEPRECATE -> {
-                if (from != Status.ACTIVE) throw new ConflictException("Only ACTIVE plugins can be deprecated");
+                if (from != Status.ACTIVE) throw new WebApplicationException("Only ACTIVE plugins can be deprecated");
                 yield Status.DEPRECATED;
             }
             case REACTIVATE -> {
-                if (from != Status.DEPRECATED) throw new ConflictException("Only DEPRECATED plugins can be reactivated");
+                if (from != Status.DEPRECATED) throw new WebApplicationException("Only DEPRECATED plugins can be reactivated");
                 yield Status.ACTIVE;
             }
             case REVOKE -> {
-                if (from == Status.REVOKED) throw new ConflictException("REVOKED is terminal");
+                if (from == Status.REVOKED) throw new WebApplicationException("REVOKED is terminal");
                 yield Status.REVOKED;
             }
         };
