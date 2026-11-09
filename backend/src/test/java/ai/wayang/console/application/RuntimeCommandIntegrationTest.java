@@ -21,6 +21,7 @@ class RuntimeCommandIntegrationTest {
     @Inject RuntimeCommandService commands;
     @Inject RuntimeInventoryService inventory;
     @Inject RuntimeCompatibilityEvaluator compatibility;
+    @Inject DeploymentReconciliationService reconciliation;
 
     @Test
     @TestTransaction
@@ -41,7 +42,16 @@ class RuntimeCommandIntegrationTest {
         deployments.transition(organization, Set.of(environment), deployment.id(), "VALIDATING", null, "operator-test");
         deployments.transition(organization, Set.of(environment), deployment.id(), "READY", null, "operator-test");
 
+        var absent = reconciliation.setDesired(organization, Set.of(environment), deployment.id(), "ABSENT", "operator-test");
+        assertEquals(1L, absent.generation());
+        assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> commands.dispatch(organization, Set.of(environment), deployment.id(), "operator-test"));
+        var present = reconciliation.setDesired(organization, Set.of(environment), deployment.id(), "PRESENT", "operator-test");
+        assertEquals(2L, present.generation());
+
         var command = commands.dispatch(organization, Set.of(environment), deployment.id(), "operator-test");
+        assertTrue(command.idempotencyKey().contains(":generation:2:"));
+        assertTrue(command.typedPayload().contains("\"generation\":2"));
         assertThrows(jakarta.ws.rs.WebApplicationException.class, () -> deployments.transition(
                 organization, Set.of(environment), deployment.id(), "DEPLOYED", null, "operator-test"));
         var repeated = commands.dispatch(organization, Set.of(environment), deployment.id(), "operator-test");
