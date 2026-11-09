@@ -27,6 +27,12 @@ public class PluginApprovalService {
         PluginCatalogEntryEntity entry = find(org, env, plugin, version);
         if (entry == null) throw new NotFoundException("Catalog entry not found");
         if (actor == null || actor.isBlank()) throw new BadRequestException("Actor is required");
+
+        // Serialize request creation with decisions for this immutable catalog version.
+        // The unique constraint remains the final integrity guard, while this lock makes
+        // concurrent duplicate requests resolve to the existing PENDING state rather
+        // than racing into a constraint violation.
+        entry = em.find(PluginCatalogEntryEntity.class, entry.id, LockModeType.PESSIMISTIC_WRITE);
         ensureDistributable(entry);
         PluginCatalogGovernanceEntity governance = governance(entry.id);
         if (governance != null && !"ACTIVE".equals(governance.lifecycleStatus))
