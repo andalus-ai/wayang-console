@@ -48,7 +48,7 @@ public class ArtifactRegistryService {
    try{verify(org,env,artifact.artifactDigest,artifact.manifestDigest,artifact.signingKeyId,artifact.signature);return;}
    catch(WebApplicationException invalid){last=invalid;}
   }
-  throw new WebApplicationException("No artifact for this manifest has a currently trusted signature",409,last);
+  throw new WebApplicationException("No artifact for this manifest has a currently trusted signature",last,409);
  }
  @Transactional public void assertRegistered(UUID org,UUID env,String digest,String manifest){
   ArtifactEntity a=ArtifactEntity.find("organizationId = ?1 and environmentId = ?2 and artifactDigest = ?3",org,env,digest.toLowerCase()).firstResult();
