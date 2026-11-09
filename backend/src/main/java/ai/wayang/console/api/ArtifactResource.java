@@ -26,6 +26,17 @@ public class ArtifactResource {
     .header("X-Artifact-Signature",a.signature()).header("X-Signing-Key-Id",a.signingKeyId()).build();
   }catch(SecurityException e){return unauthorized();}
  }
+ @GET @Path("/runtime/plugins/{pluginId}/versions/{version}/artifact") @Produces(MediaType.APPLICATION_OCTET_STREAM)
+ public Response downloadApprovedPlugin(@HeaderParam("Authorization")String authorization,
+  @PathParam("pluginId")String pluginId,@PathParam("version")String version){
+  String token=bearer(authorization);if(token==null)return unauthorized();
+  try{var runtime=runtimes.authenticate(token);var a=artifacts.openApprovedPluginForRuntime(runtime,pluginId,version);
+   StreamingOutput body=out->{try(InputStream in=a.content()){in.transferTo(out);}};
+   return Response.ok(body).header("Content-Length",a.sizeBytes()).header("X-Artifact-Digest",a.digest())
+    .header("X-Manifest-Digest",a.manifestDigest()).header("X-Artifact-Signature",a.signature())
+    .header("X-Signing-Key-Id",a.signingKeyId()).build();
+  }catch(SecurityException e){return unauthorized();}
+ }
  private static Response unauthorized(){return Response.status(401).entity("Runtime credential invalid or expired").build();}
  private static String bearer(String h){if(h==null||!h.regionMatches(true,0,"Bearer ",0,7))return null;String t=h.substring(7).trim();return t.isEmpty()?null:t;}
 }
