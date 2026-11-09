@@ -33,7 +33,7 @@ class DeploymentReconciliationIntegrationTest {
         var desired = reconciliation.setDesired(org, Set.of(env), deployment.id(), "PRESENT", "test-operator");
         assertEquals("WAITING_RUNTIME", desired.reconciliationState());
         var observation = new DeploymentReconciliationService.Observation(
-                "RUNNING", digest, UUID.randomUUID(), 1, Instant.now(), null);
+                "RUNNING", digest, UUID.randomUUID(), 1, 1, Instant.now(), null);
         var accepted = reconciliation.report(runtime, deployment.id(), observation);
         assertEquals("IN_SYNC", accepted.reconciliationState());
         assertEquals(1, accepted.reportSequence());
@@ -58,9 +58,36 @@ class DeploymentReconciliationIntegrationTest {
                 "orders.flow", "1.0.0", expected, expected, "test-operator");
         assertThrows(jakarta.ws.rs.NotFoundException.class, () -> reconciliation.report(other,
                 deployment.id(), new DeploymentReconciliationService.Observation(
-                        "RUNNING", actual, null, 1, Instant.now(), "wrong runtime")));
+                        "RUNNING", actual, null, 1, 1, Instant.now(), "wrong runtime")));
         var accepted = reconciliation.report(owner, deployment.id(),
-                new DeploymentReconciliationService.Observation("RUNNING", actual, null, 1, Instant.now(), null));
+                new DeploymentReconciliationService.Observation("RUNNING", actual, null, 1, 1, Instant.now(), null));
         assertEquals("DRIFTED", accepted.reconciliationState());
     }
+    @Test
+    @TestTransaction
+    void rejectsObservationFromOlderDesiredGeneration() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "generation-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "e".repeat(64);
+        var deployment = deployments.create(org, Set.of(env), runtime.id(), "generation-" + UUID.randomUUID(),
+                "orders.flow", "1.0.0", digest, digest, "test-operator");
+        var first = reconciliation.setDesired(org, Set.of(env), deployment.id(), "PRESENT", "test-operator");
+        var second = reconciliation.setDesired(org, Set.of(env), deployment.id(), "ABSENT", "test-operator");
+        assertEquals(1L, first.generation());
+        assertEquals(2L, second.generation());
+
+        var stale = new DeploymentReconciliationService.Observation(
+                "RUNNING", digest, UUID.randomUUID(), 1, 1, Instant.now(), "late report from generation 1");
+        assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> reconciliation.report(runtime, deployment.id(), stale));
+
+        var current = new DeploymentReconciliationService.Observation(
+                "ABSENT", null, UUID.randomUUID(), 2, 1, Instant.now(), null);
+        var accepted = reconciliation.report(runtime, deployment.id(), current);
+        assertEquals("IN_SYNC", accepted.reconciliationState());
+        assertEquals(2L, accepted.generation());
+    }
+
 }
