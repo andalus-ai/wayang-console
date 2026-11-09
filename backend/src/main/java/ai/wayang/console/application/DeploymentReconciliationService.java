@@ -10,17 +10,22 @@ import jakarta.transaction.Transactional;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import java.time.Instant;
+import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 import java.util.Set;
 
 @ApplicationScoped
 public class DeploymentReconciliationService {
+    private static final Duration OBSERVATION_TIMEOUT = Duration.ofMinutes(2);
+    private static final int MAX_RETRIES = 5;
     @Inject AuditIntegrityService audit;
 
     public record ReconciliationView(UUID deploymentId, String desiredState, long generation,
             String observedState, String observedArtifactDigest, UUID observedCommandId,
             long reportSequence, Instant observedAt, Instant receivedAt,
-            String reconciliationState, String diagnostic, Instant updatedAt) {}
+            String reconciliationState, String diagnostic, Instant updatedAt,
+            int retryCount, Instant nextAttemptAt, Instant lastAttemptAt) {}
     public record Observation(String state, String artifactDigest, UUID commandId,
             long generation, long sequence, Instant observedAt, String diagnostic) {}
 
@@ -39,6 +44,9 @@ public class DeploymentReconciliationService {
             row.generation = 1; row.observedState = "UNKNOWN"; row.reportSequence = 0;
         } else if (!row.desiredState.equals(desired)) {
             row.generation++;
+            row.retryCount = 0;
+            row.nextAttemptAt = null;
+            row.lastAttemptAt = null;
         }
         row.desiredState = desired;
         row.reconciliationState = evaluate(desired, row.observedState, deployment.artifactDigest, row.observedArtifactDigest);
@@ -91,11 +99,52 @@ public class DeploymentReconciliationService {
         row.receivedAt = receivedAt;
         row.diagnostic = diagnostic;
         row.reconciliationState = evaluate(row.desiredState, state, deployment.artifactDigest, row.observedArtifactDigest);
+        row.retryCount = 0;
+        row.nextAttemptAt = null;
+        row.lastAttemptAt = null;
         row.updatedAt = receivedAt;
         row.persist();
         audit.append(deployment.organizationId, deployment.environmentId, "runtime:" + runtime.id(),
                 "DEPLOYMENT_OBSERVATION_ACCEPTED", "DEPLOYMENT", deployment.id.toString(), receivedAt, "SUCCESS");
         return view(row);
+    }
+
+
+    @Transactional
+    public int scheduleTimedOutRetries(Instant now) {
+        Instant deadline = now.minus(OBSERVATION_TIMEOUT);
+        List<DeploymentReconciliationEntity> timedOut = DeploymentReconciliationEntity
+                .<DeploymentReconciliationEntity>find(
+                        "desiredState = 'PRESENT' and reconciliationState = 'WAITING_RUNTIME' and updatedAt <= ?1 order by updatedAt",
+                        deadline)
+                .withLock(LockModeType.PESSIMISTIC_WRITE).range(0, 99).list();
+        for (DeploymentReconciliationEntity row : timedOut) {
+            if (row.retryCount >= MAX_RETRIES) {
+                row.reconciliationState = "MANUAL_INTERVENTION";
+                row.nextAttemptAt = null;
+                row.diagnostic = "Observation timed out after " + MAX_RETRIES + " automatic retries";
+            } else {
+                row.retryCount++;
+                row.reconciliationState = "RETRYING";
+                row.nextAttemptAt = now.plus(retryDelay(row.retryCount));
+                row.diagnostic = "Runtime observation timed out; retry " + row.retryCount
+                        + " scheduled for " + row.nextAttemptAt;
+            }
+            row.updatedAt = now;
+        }
+        return timedOut.size();
+    }
+
+    @Transactional
+    public List<UUID> dueRetryDeploymentIds(Instant now) {
+        return DeploymentReconciliationEntity.<DeploymentReconciliationEntity>list(
+                "reconciliationState = 'RETRYING' and desiredState = 'PRESENT' and nextAttemptAt <= ?1 order by nextAttemptAt",
+                now).stream().map(row -> row.deploymentId).limit(100).toList();
+    }
+
+    static Duration retryDelay(int retryCount) {
+        long seconds = Math.min(900L, 30L * (1L << Math.max(0, Math.min(retryCount - 1, 10))));
+        return Duration.ofSeconds(seconds);
     }
 
     @Transactional
@@ -149,6 +198,7 @@ public class DeploymentReconciliationService {
     private static ReconciliationView view(DeploymentReconciliationEntity r) {
         return new ReconciliationView(r.deploymentId, r.desiredState, r.generation, r.observedState,
                 r.observedArtifactDigest, r.observedCommandId, r.reportSequence, r.observedAt,
-                r.receivedAt, r.reconciliationState, r.diagnostic, r.updatedAt);
+                r.receivedAt, r.reconciliationState, r.diagnostic, r.updatedAt,
+                r.retryCount, r.nextAttemptAt, r.lastAttemptAt);
     }
 }
