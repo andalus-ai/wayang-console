@@ -1,6 +1,9 @@
 package ai.wayang.console.application;
 
 import ai.wayang.console.adapter.persistence.ArtifactEntity;
+import ai.wayang.console.adapter.persistence.PluginCatalogEntryEntity;
+import ai.wayang.console.adapter.persistence.PluginApprovalEntity;
+import ai.wayang.console.adapter.persistence.PluginCatalogGovernanceEntity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
@@ -36,14 +39,55 @@ public class ArtifactRegistryService {
    audit.append(org,env,actor,"ARTIFACT_REGISTERED","ARTIFACT",a.id.toString(),now,"SUCCESS");return view(a);
   }catch(RuntimeException e){try{storage.delete(stored.objectKey());}catch(IOException cleanup){e.addSuppressed(cleanup);}throw e;}
  }
+ @Transactional public void assertManifestDistributable(UUID org,UUID env,String manifest){
+  if(manifest==null||!manifest.matches("(?i)sha256:[0-9a-f]{64}"))throw new WebApplicationException("Invalid manifest digest",400);
+  List<ArtifactEntity> matches=ArtifactEntity.list("organizationId = ?1 and environmentId = ?2 and manifestDigest = ?3",org,env,manifest.toLowerCase());
+  if(matches.isEmpty())throw new WebApplicationException("A registered artifact matching the catalog manifest is required",409);
+  WebApplicationException last=null;
+  for(ArtifactEntity artifact:matches){
+   try{verify(org,env,artifact.artifactDigest,artifact.manifestDigest,artifact.signingKeyId,artifact.signature);return;}
+   catch(WebApplicationException invalid){last=invalid;}
+  }
+  throw new WebApplicationException("No artifact for this manifest has a currently trusted signature",last,409);
+ }
  @Transactional public void assertRegistered(UUID org,UUID env,String digest,String manifest){
   ArtifactEntity a=ArtifactEntity.find("organizationId = ?1 and environmentId = ?2 and artifactDigest = ?3",org,env,digest.toLowerCase()).firstResult();
   if(a==null||!a.manifestDigest.equalsIgnoreCase(manifest))throw new WebApplicationException("Verified artifact and manifest are required",409);
+ }
+ @Transactional public Download openApprovedPluginForRuntime(RuntimeRegistryService.AuthenticatedRuntime runtime,String pluginId,String version){
+  PluginCatalogEntryEntity entry=PluginCatalogEntryEntity.find(
+   "organizationId = ?1 and environmentId = ?2 and pluginId = ?3 and pluginVersion = ?4",
+   runtime.organizationId(),runtime.environmentId(),pluginId,version).firstResult();
+  if(entry==null)throw new NotFoundException("Plugin version not found");
+  PluginApprovalEntity approval=PluginApprovalEntity.find("catalogEntryId",entry.id).firstResult();
+  if(approval==null||!"APPROVED".equals(approval.approvalStatus))throw new WebApplicationException("Plugin version is not approved for distribution",403);
+  PluginCatalogGovernanceEntity governance=PluginCatalogGovernanceEntity.find("catalogEntryId",entry.id).firstResult();
+  if(governance!=null&&!"ACTIVE".equals(governance.lifecycleStatus))throw new WebApplicationException("Plugin version is not active",403);
+  List<ArtifactEntity> matches=ArtifactEntity.list("organizationId = ?1 and environmentId = ?2 and manifestDigest = ?3",
+   runtime.organizationId(),runtime.environmentId(),entry.manifestDigest);
+  for(ArtifactEntity artifact:matches){
+   try{
+    verify(runtime.organizationId(),runtime.environmentId(),artifact.artifactDigest,artifact.manifestDigest,artifact.signingKeyId,artifact.signature);
+    return openForRuntime(runtime,artifact.artifactDigest);
+   }catch(WebApplicationException invalid){ /* try another artifact for the same immutable manifest */ }
+  }
+  throw new WebApplicationException("No currently trusted artifact is available for this approved plugin",409);
  }
  @Transactional public Download openForRuntime(RuntimeRegistryService.AuthenticatedRuntime runtime,String digest){
   validateDigest(digest,"artifactDigest");
   ArtifactEntity a=ArtifactEntity.find("organizationId = ?1 and environmentId = ?2 and artifactDigest = ?3",runtime.organizationId(),runtime.environmentId(),digest.toLowerCase()).firstResult();
   if(a==null)throw new NotFoundException("Artifact not found");
+  List<PluginCatalogEntryEntity> pluginEntries=PluginCatalogEntryEntity.list(
+   "organizationId = ?1 and environmentId = ?2 and manifestDigest = ?3",
+   runtime.organizationId(),runtime.environmentId(),a.manifestDigest);
+  for(PluginCatalogEntryEntity entry:pluginEntries){
+   PluginApprovalEntity approval=PluginApprovalEntity.find("catalogEntryId",entry.id).firstResult();
+   PluginCatalogGovernanceEntity governance=PluginCatalogGovernanceEntity.find("catalogEntryId",entry.id).firstResult();
+   if(approval==null||!"APPROVED".equals(approval.approvalStatus)
+     ||(governance!=null&&!"ACTIVE".equals(governance.lifecycleStatus)))
+    throw new WebApplicationException("Plugin artifact is not currently approved for distribution",403);
+  }
+  verify(runtime.organizationId(),runtime.environmentId(),a.artifactDigest,a.manifestDigest,a.signingKeyId,a.signature);
   try{return new Download(a.artifactDigest,a.manifestDigest,a.signature,a.signingKeyId,a.sizeBytes,storage.open(a.objectKey));}catch(IOException e){throw new WebApplicationException("Artifact storage unavailable",503);}
  }
  private void verify(UUID org,UUID env,String digest,String manifest,String keyId,String sig){
