@@ -22,7 +22,7 @@ public class DeploymentReconciliationService {
             long reportSequence, Instant observedAt, Instant receivedAt,
             String reconciliationState, String diagnostic, Instant updatedAt) {}
     public record Observation(String state, String artifactDigest, UUID commandId,
-            long sequence, Instant observedAt, String diagnostic) {}
+            long generation, long sequence, Instant observedAt, String diagnostic) {}
 
     @Transactional
     public ReconciliationView setDesired(UUID organizationId, Set<UUID> environments,
@@ -75,6 +75,9 @@ public class DeploymentReconciliationService {
             row = new DeploymentReconciliationEntity();
             row.id = UUID.randomUUID(); row.deploymentId = deploymentId;
             row.desiredState = "PRESENT"; row.generation = 1; row.reportSequence = 0;
+        }
+        if (observation.generation() < 1 || observation.generation() != row.generation) {
+            throw new WebApplicationException("Observation generation does not match current desired state", 409);
         }
         if (observation.sequence() <= row.reportSequence) {
             throw new WebApplicationException("Observation sequence is stale or already accepted", 409);
