@@ -1,6 +1,7 @@
 package ai.wayang.console.application;
 
 import ai.wayang.console.testsupport.PostgresTestResource;
+import ai.wayang.console.adapter.persistence.DeploymentReconciliationEntity;
 import io.quarkus.test.TestTransaction;
 import io.quarkus.test.common.QuarkusTestResource;
 import io.quarkus.test.junit.QuarkusTest;
@@ -18,6 +19,8 @@ class DeploymentReconciliationIntegrationTest {
     @Inject RuntimeRegistryService registry;
     @Inject DeploymentLifecycleService deployments;
     @Inject DeploymentReconciliationService reconciliation;
+    @Inject RuntimeInventoryService inventory;
+    @Inject RuntimeCommandService commands;
 
     @Test
     @TestTransaction
@@ -88,6 +91,65 @@ class DeploymentReconciliationIntegrationTest {
         var accepted = reconciliation.report(runtime, deployment.id(), current);
         assertEquals("IN_SYNC", accepted.reconciliationState());
         assertEquals(2L, accepted.generation());
+    }
+
+    @Test
+    @TestTransaction
+    void timedOutObservationSchedulesBackoffAndQueuesOneRetry() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "retry-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        UUID runtimeId = UUID.fromString(enrolled.registrationId());
+        inventory.replaceInventory(runtimeId,
+                java.util.List.of(new RuntimeInventoryService.CapabilityInput(
+                        "wayang.runtime", "1.2.0", "workflow.execute")), java.util.List.of());
+        String digest = "sha256:" + "f".repeat(64);
+        var deployment = deployments.create(org, Set.of(env), runtimeId, "retry-" + UUID.randomUUID(),
+                "orders.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), deployment.id(), "PRESENT", "test-operator");
+
+        Instant now = Instant.now();
+        DeploymentReconciliationEntity row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        row.updatedAt = now.minus(Duration.ofMinutes(3));
+        row.persist();
+
+        assertEquals(1, reconciliation.scheduleTimedOutRetries(now));
+        row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        assertEquals("RETRYING", row.reconciliationState);
+        assertEquals(1, row.retryCount);
+        assertEquals(now.plusSeconds(30), row.nextAttemptAt);
+
+        assertTrue(commands.dispatchDueRetry(deployment.id(), now.plusSeconds(30)));
+        row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        assertEquals("WAITING_RUNTIME", row.reconciliationState);
+        assertNull(row.nextAttemptAt);
+        assertEquals(1, row.retryCount);
+        assertNotNull(row.lastAttemptAt);
+        assertFalse(commands.dispatchDueRetry(deployment.id(), now.plusSeconds(30)));
+    }
+
+    @Test
+    @TestTransaction
+    void exhaustedReconciliationRetriesRequireManualIntervention() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "retry-exhausted-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "9".repeat(64);
+        var deployment = deployments.create(org, Set.of(env), runtime.id(), "retry-exhausted-" + UUID.randomUUID(),
+                "orders.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), deployment.id(), "PRESENT", "test-operator");
+        Instant now = Instant.now();
+        DeploymentReconciliationEntity row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        row.retryCount = 5;
+        row.updatedAt = now.minus(Duration.ofMinutes(3));
+        row.persist();
+
+        assertEquals(1, reconciliation.scheduleTimedOutRetries(now));
+        row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        assertEquals("MANUAL_INTERVENTION", row.reconciliationState);
+        assertNull(row.nextAttemptAt);
+        assertTrue(row.diagnostic.contains("5 automatic retries"));
     }
 
 }
