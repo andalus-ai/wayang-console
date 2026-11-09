@@ -89,7 +89,7 @@ Append audit events for desired-state changes, accepted/ignored runtime reports,
 3. Reconciliation evaluator (pure decision function) with unit tests.
 4. Reuse the durable management-command queue and idempotent generation-aware command scheduling; do not introduce a duplicate outbox without a separate durability requirement. (Apply dispatch implemented.)
 5. Scoped operator status endpoint.
-6. Retry worker, backoff, restart recovery, and integration tests.
+6. Retry worker, bounded backoff, restart recovery, and integration tests. (M1.10.3 implemented.)
 7. Only then add opt-in apply/rollback remediation actions.
 
 ## Acceptance criteria
