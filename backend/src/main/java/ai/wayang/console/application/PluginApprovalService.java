@@ -10,9 +10,9 @@ public class PluginApprovalService {
  @Transactional public ApprovalView request(UUID org,UUID env,String plugin,String version,String actor) {
   PluginCatalogEntryEntity entry=find(org,env,plugin,version); if(entry==null)throw new NotFoundException("Catalog entry not found");
   PluginCatalogGovernanceEntity governance=PluginCatalogGovernanceEntity.find("catalogEntryId",entry.id).firstResult();
-  if(governance!=null && "REVOKED".equals(governance.lifecycleStatus))throw new ConflictException("Revoked catalog entry cannot be submitted for approval");
+  if(governance!=null && "REVOKED".equals(governance.lifecycleStatus))throw new WebApplicationException("Revoked catalog entry cannot be submitted for approval");
   PluginApprovalEntity current=PluginApprovalEntity.find("catalogEntryId",entry.id).firstResult();
-  if(current!=null){if("PENDING".equals(current.approvalStatus))return view(current);throw new ConflictException("Approval already exists; use a new catalog version for resubmission");}
+  if(current!=null){if("PENDING".equals(current.approvalStatus))return view(current);throw new WebApplicationException("Approval already exists; use a new catalog version for resubmission");}
   Instant now=Instant.now(); PluginApprovalEntity state=new PluginApprovalEntity(); state.id=UUID.randomUUID();state.catalogEntryId=entry.id;state.organizationId=org;state.environmentId=env;state.approvalStatus="PENDING";state.requestedBy=actor;state.requestedAt=now;state.persist();
   event(entry,org,env,null,"PENDING",actor,"Submitted for distribution approval",now);
   audit.append(org,env,actor,"PLUGIN_APPROVAL_REQUESTED","PLUGIN_CATALOG_ENTRY",entry.id.toString(),now,"SUCCESS");return view(state);
@@ -22,14 +22,14 @@ public class PluginApprovalService {
   String reason=decision.reason()==null?"":decision.reason().trim();if(reason.isEmpty()||reason.length()>1000)throw new BadRequestException("Decision reason is required (max 1000)");
   PluginCatalogEntryEntity entry=find(org,env,plugin,version);if(entry==null)throw new NotFoundException("Catalog entry not found");
   entry=em.find(PluginCatalogEntryEntity.class,entry.id,LockModeType.PESSIMISTIC_WRITE);
-  PluginApprovalEntity state=PluginApprovalEntity.find("catalogEntryId",entry.id).firstResult();if(state==null)throw new ConflictException("Approval has not been requested");
+  PluginApprovalEntity state=PluginApprovalEntity.find("catalogEntryId",entry.id).firstResult();if(state==null)throw new WebApplicationException("Approval has not been requested");
   state=em.find(PluginApprovalEntity.class,state.id,LockModeType.PESSIMISTIC_WRITE);
-  if(!"PENDING".equals(state.approvalStatus))throw new ConflictException("Approval decision is final for this catalog version");
+  if(!"PENDING".equals(state.approvalStatus))throw new WebApplicationException("Approval decision is final for this catalog version");
   if(actor.equals(state.requestedBy))throw new ForbiddenException("Publisher cannot approve or reject its own submission");
   String action=decision.action().toUpperCase(java.util.Locale.ROOT);if(!action.equals("APPROVE")&&!action.equals("REJECT"))throw new BadRequestException("action must be APPROVE or REJECT");
   if(action.equals("APPROVE")){
    PluginCatalogGovernanceEntity gov=PluginCatalogGovernanceEntity.find("catalogEntryId",entry.id).firstResult();
-   if(gov!=null&&!"ACTIVE".equals(gov.lifecycleStatus))throw new ConflictException("Only ACTIVE catalog entries may be approved");
+   if(gov!=null&&!"ACTIVE".equals(gov.lifecycleStatus))throw new WebApplicationException("Only ACTIVE catalog entries may be approved");
    artifacts.assertRegistered(org,env,entry.manifestDigest,entry.manifestDigest);
   }
   Instant now=Instant.now();String status=action.equals("APPROVE")?"APPROVED":"REJECTED";
