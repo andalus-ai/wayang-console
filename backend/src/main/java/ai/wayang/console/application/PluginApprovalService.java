@@ -27,15 +27,21 @@ public class PluginApprovalService {
         PluginCatalogEntryEntity entry = find(org, env, plugin, version);
         if (entry == null) throw new NotFoundException("Catalog entry not found");
         if (actor == null || actor.isBlank()) throw new BadRequestException("Actor is required");
+
+        // Serialize request creation with decisions for this immutable catalog version.
+        // The unique constraint remains the final integrity guard, while this lock makes
+        // concurrent duplicate requests resolve to the existing PENDING state rather
+        // than racing into a constraint violation.
+        entry = em.find(PluginCatalogEntryEntity.class, entry.id, LockModeType.PESSIMISTIC_WRITE);
         ensureDistributable(entry);
         PluginCatalogGovernanceEntity governance = governance(entry.id);
         if (governance != null && !"ACTIVE".equals(governance.lifecycleStatus))
-            throw new ConflictException("Only ACTIVE catalog entries can be submitted for approval");
+            throw new WebApplicationException("Only ACTIVE catalog entries can be submitted for approval", 409);
 
         PluginApprovalEntity current = approval(entry.id);
         if (current != null) {
             if ("PENDING".equals(current.approvalStatus)) return view(current);
-            throw new ConflictException("Approval is final for this catalog version; publish a new version to resubmit");
+            throw new WebApplicationException("Approval is final for this catalog version; publish a new version to resubmit", 409);
         }
         Instant now = Instant.now();
         PluginApprovalEntity state = new PluginApprovalEntity();
@@ -62,16 +68,16 @@ public class PluginApprovalService {
         if (entry == null) throw new NotFoundException("Catalog entry not found");
         entry = em.find(PluginCatalogEntryEntity.class, entry.id, LockModeType.PESSIMISTIC_WRITE);
         PluginApprovalEntity state = approval(entry.id);
-        if (state == null) throw new ConflictException("Approval has not been requested");
+        if (state == null) throw new WebApplicationException("Approval has not been requested", 409);
         state = em.find(PluginApprovalEntity.class, state.id, LockModeType.PESSIMISTIC_WRITE);
-        if (!"PENDING".equals(state.approvalStatus)) throw new ConflictException("Approval decision is final");
+        if (!"PENDING".equals(state.approvalStatus)) throw new WebApplicationException("Approval decision is final", 409);
         if (actor.equals(state.requestedBy) || actor.equals(entry.publishedBy))
             throw new ForbiddenException("Publisher/requester cannot decide their own submission");
 
         if (action.equals("APPROVE")) {
             PluginCatalogGovernanceEntity gov = governance(entry.id);
             if (gov != null && !"ACTIVE".equals(gov.lifecycleStatus))
-                throw new ConflictException("Only ACTIVE catalog entries may be approved");
+                throw new WebApplicationException("Only ACTIVE catalog entries may be approved", 409);
             ensureDistributable(entry);
         }
         Instant now = Instant.now();
