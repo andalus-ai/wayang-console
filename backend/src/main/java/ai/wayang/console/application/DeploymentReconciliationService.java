@@ -147,6 +147,36 @@ public class DeploymentReconciliationService {
         return Duration.ofSeconds(seconds);
     }
 
+    /** Operator-authorized retry after a runtime failure or exhausted automatic recovery. */
+    @Transactional
+    public ReconciliationView requestOperatorRetry(UUID organizationId, Set<UUID> environments,
+            UUID deploymentId, String actor, String reason) {
+        String rationale = bounded(reason, 500);
+        if (rationale == null || rationale.isBlank())
+            throw new IllegalArgumentException("A non-empty retry reason is required");
+        DeploymentEntity deployment = scopedForUpdate(deploymentId, organizationId, environments);
+        DeploymentReconciliationEntity row = DeploymentReconciliationEntity
+                .<DeploymentReconciliationEntity>find("deploymentId", deploymentId)
+                .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
+        if (row == null) throw new NotFoundException("Reconciliation state not found");
+        if (!"PRESENT".equals(row.desiredState))
+            throw new WebApplicationException("Only PRESENT deployments can be retried", 409);
+        if (!"FAILED".equals(row.observedState) && !"MANUAL_INTERVENTION".equals(row.reconciliationState))
+            throw new WebApplicationException("Operator retry requires a FAILED observation or manual-intervention state", 409);
+        if (deployment.runtimeId == null)
+            throw new WebApplicationException("Deployment has no target runtime", 409);
+        Instant now = Instant.now();
+        row.retryCount = 0;
+        row.nextAttemptAt = now;
+        row.reconciliationState = "RETRYING";
+        row.diagnostic = "Operator retry requested: " + rationale;
+        row.updatedAt = now;
+        row.persist();
+        audit.append(deployment.organizationId, deployment.environmentId, actor,
+                "DEPLOYMENT_OPERATOR_RETRY_REQUESTED", "DEPLOYMENT", deployment.id.toString(), now, "SUCCESS");
+        return view(row);
+    }
+
     @Transactional
     public ReconciliationView get(UUID organizationId, Set<UUID> environments, UUID deploymentId) {
         scoped(deploymentId, organizationId, environments);
@@ -174,6 +204,7 @@ public class DeploymentReconciliationService {
 
     private static String evaluate(String desired, String observed, String expectedDigest, String actualDigest) {
         if ("ABSENT".equals(desired) && "ABSENT".equals(observed)) return "IN_SYNC";
+        if ("FAILED".equals(observed)) return "MANUAL_INTERVENTION";
         if ("PRESENT".equals(desired) && "RUNNING".equals(observed))
             return expectedDigest != null && expectedDigest.equalsIgnoreCase(actualDigest) ? "IN_SYNC" : "DRIFTED";
         if ("ROLLBACK".equals(desired)) return "WAITING_RUNTIME";
