@@ -163,7 +163,7 @@ class DeploymentReconciliationIntegrationTest {
         var queued = ai.wayang.console.adapter.persistence.ManagementCommandEntity
                 .find("deploymentId", deployment.id()).firstResult();
         assertNotNull(queued);
-        assertTrue(queued.typedPayload.contains("\\"retryAttempt\\":0"));
+        assertTrue(queued.typedPayload.contains("\"retryAttempt\":0"));
     }
 
     @Test
