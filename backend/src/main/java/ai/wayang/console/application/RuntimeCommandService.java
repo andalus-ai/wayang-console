@@ -215,8 +215,9 @@ public class RuntimeCommandService {
             reconciliation.updatedAt = now;
             return false;
         }
+        long retryScheduleEpochMillis = reconciliation.nextAttemptAt.toEpochMilli();
         String idempotencyKey = "deployment:" + deployment.id + ":generation:" + reconciliation.generation
-                + ":retry:" + reconciliation.retryCount + ":apply:v1";
+                + ":retry:" + reconciliation.retryCount + ":scheduled:" + retryScheduleEpochMillis + ":apply:v1";
         ManagementCommandEntity existing = ManagementCommandEntity.find("idempotencyKey", idempotencyKey).firstResult();
         if (existing != null) {
             reconciliation.nextAttemptAt = now.plusSeconds(30);
