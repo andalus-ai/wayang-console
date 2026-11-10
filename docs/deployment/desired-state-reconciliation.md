@@ -107,3 +107,16 @@ Append audit events for desired-state changes, accepted/ignored runtime reports,
 ## Explicitly out of scope
 
 No runtime process execution in Console, no mandatory Kafka/Numou dependency, no automatic destructive stop, no independent remote attestation, and no claim of exactly-once delivery. Commands remain at-least-once and require runtime idempotency.
+
+
+## M1.10.4 — operator-controlled recovery
+
+Runtime-reported `FAILED` observations now enter `MANUAL_INTERVENTION` rather than being treated as an ordinary drift signal. An operator with `console:runtime:admin` permission can request a scoped retry through:
+
+`POST /api/v1/console/deployments/{deploymentId}/reconciliation/retry`
+
+The request requires a non-empty reason. The endpoint derives organization, environment scope, and actor from the authenticated Console operator; clients cannot supply or override those values. The retry request resets the automatic retry counter, schedules an immediate retry, and appends a tamper-evident audit record. The existing retry worker performs the dispatch and re-evaluates runtime compatibility before queuing an apply command.
+
+Only deployments whose desired state is `PRESENT` and whose observed state is `FAILED`, or whose reconciliation state is `MANUAL_INTERVENTION`, are eligible. `ABSENT` and `ROLLBACK` are never retried by this endpoint. A newer desired generation clears scheduled retry metadata; stale observations remain rejected by the generation check. The runtime must also enforce generation fencing when applying commands, because a command already delivered before supersession cannot be recalled reliably by the Console alone.
+
+The operator retry integration test covers the FAILED-to-MANUAL_INTERVENTION transition and the audited retry scheduling path. Authorization and organization/environment isolation are enforced by the existing authenticated operator context and scoped service lookup.
