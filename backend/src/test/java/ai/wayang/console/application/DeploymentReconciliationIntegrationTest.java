@@ -141,6 +141,9 @@ class DeploymentReconciliationIntegrationTest {
         var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
         var enrolled = registry.enroll(enrollment.token(), "operator-retry-" + UUID.randomUUID(), "1.2.0", null, null, null);
         var runtime = registry.authenticate(enrolled.registrationToken());
+        inventory.replaceInventory(runtime.id(),
+                java.util.List.of(new RuntimeInventoryService.CapabilityInput(
+                        "wayang.runtime", "1.2.0", "workflow.execute")), java.util.List.of());
         String digest = "sha256:" + "d".repeat(64);
         var deployment = deployments.create(org, Set.of(env), runtime.id(), "operator-retry-" + UUID.randomUUID(),
                 "orders.flow", "1.0.0", digest, digest, "test-operator");
@@ -156,6 +159,11 @@ class DeploymentReconciliationIntegrationTest {
         assertEquals(0, retry.retryCount());
         assertNotNull(retry.nextAttemptAt());
         assertTrue(retry.diagnostic().contains("runtime capacity restored"));
+        assertTrue(commands.dispatchDueRetry(deployment.id(), retry.nextAttemptAt()));
+        var queued = ai.wayang.console.adapter.persistence.ManagementCommandEntity
+                .find("deploymentId", deployment.id()).firstResult();
+        assertNotNull(queued);
+        assertTrue(queued.typedPayload.contains("\\"retryAttempt\\":0"));
     }
 
     @Test
