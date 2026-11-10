@@ -136,6 +136,30 @@ class DeploymentReconciliationIntegrationTest {
 
     @Test
     @TestTransaction
+    void operatorCanRetryFailedDeploymentWithAuditedReason() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "operator-retry-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "d".repeat(64);
+        var deployment = deployments.create(org, Set.of(env), runtime.id(), "operator-retry-" + UUID.randomUUID(),
+                "orders.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), deployment.id(), "PRESENT", "test-operator");
+        var failed = reconciliation.report(runtime, deployment.id(),
+                new DeploymentReconciliationService.Observation("FAILED", null, UUID.randomUUID(),
+                        1, 1, Instant.now(), "runtime apply failed"));
+        assertEquals("MANUAL_INTERVENTION", failed.reconciliationState());
+
+        var retry = reconciliation.requestOperatorRetry(org, Set.of(env), deployment.id(),
+                "operator:alice", "runtime capacity restored");
+        assertEquals("RETRYING", retry.reconciliationState());
+        assertEquals(0, retry.retryCount());
+        assertNotNull(retry.nextAttemptAt());
+        assertTrue(retry.diagnostic().contains("runtime capacity restored"));
+    }
+
+    @Test
+    @TestTransaction
     void exhaustedReconciliationRetriesRequireManualIntervention() {
         UUID org = UUID.randomUUID(), env = UUID.randomUUID();
         var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
