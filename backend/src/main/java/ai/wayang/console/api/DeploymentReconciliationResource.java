@@ -28,6 +28,18 @@ public class DeploymentReconciliationResource {
                 deploymentId, request.desiredState(), operator.subject());
     }
 
+    public record OperatorRetryRequest(String reason) {}
+
+    @POST
+    @Path("/{deploymentId}/reconciliation/retry")
+    public DeploymentReconciliationService.ReconciliationView retry(
+            @PathParam("deploymentId") UUID deploymentId, OperatorRetryRequest request) {
+        operator.requireAdmin();
+        if (request == null) throw new BadRequestException("Request body is required");
+        return reconciliation.requestOperatorRetry(operator.organizationId(), operator.environmentIds(),
+                deploymentId, operator.subject(), request.reason());
+    }
+
     @GET
     @Path("/{deploymentId}/reconciliation")
     public DeploymentReconciliationService.ReconciliationView get(@PathParam("deploymentId") UUID deploymentId) {
