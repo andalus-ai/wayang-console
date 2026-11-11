@@ -129,6 +129,16 @@ public class RuntimeCommandService {
     @Transactional
     public AckView acknowledge(RuntimeRegistryService.AuthenticatedRuntime runtime,
             UUID commandId, String requestedStatus, String message, String verifiedArtifactDigest) {
+        ManagementCommandEntity snapshot = ManagementCommandEntity.findById(commandId);
+        if (snapshot == null || !snapshot.runtimeId.equals(runtime.id())
+                || !snapshot.organizationId.equals(runtime.organizationId())
+                || !snapshot.environmentId.equals(runtime.environmentId()))
+            throw new NotFoundException("Command not found");
+        // Keep lock order aligned with desired-state changes: deployment, reconciliation, command.
+        DeploymentEntity.findById(snapshot.deploymentId, LockModeType.PESSIMISTIC_WRITE);
+        DeploymentReconciliationEntity reconciliation = DeploymentReconciliationEntity
+                .<DeploymentReconciliationEntity>find("deploymentId", snapshot.deploymentId)
+                .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
         ManagementCommandEntity command = ManagementCommandEntity.findById(commandId, LockModeType.PESSIMISTIC_WRITE);
         if (command == null || !command.runtimeId.equals(runtime.id())
                 || !command.organizationId.equals(runtime.organizationId())
@@ -205,9 +215,7 @@ public class RuntimeCommandService {
                 throw new WebApplicationException("Successful deployment acknowledgement must include the matching verified artifact digest", 409);
             command.verifiedArtifactDigest = verified;
         }
-        DeploymentReconciliationEntity current = DeploymentReconciliationEntity
-                .<DeploymentReconciliationEntity>find("deploymentId", command.deploymentId).firstResult();
-        boolean currentGeneration = current == null || current.generation == command.generation;
+        boolean currentGeneration = reconciliation == null || reconciliation.generation == command.generation;
         command.status = currentGeneration ? status : ("SUCCEEDED".equals(status) ? "STALE_SUCCEEDED" : "STALE_FAILED");
         command.completedAt = now;
         command.leaseUntil = null;
