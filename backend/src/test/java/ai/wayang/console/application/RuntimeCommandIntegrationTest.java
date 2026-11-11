@@ -167,7 +167,7 @@ class RuntimeCommandIntegrationTest {
         assertEquals("STALE_SUCCEEDED", completed.status());
         assertEquals("DEPLOYING", deployments.list(organization, Set.of(environment), 0, 10)
                 .items().getFirst().status());
-        assertEquals("MANUAL_INTERVENTION",
+        assertEquals("WAITING_RUNTIME",
                 reconciliation.get(organization, Set.of(environment), deployment.id()).reconciliationState());
     }
 
