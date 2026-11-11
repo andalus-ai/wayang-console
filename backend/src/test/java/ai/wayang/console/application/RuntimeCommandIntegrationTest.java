@@ -162,7 +162,8 @@ class RuntimeCommandIntegrationTest {
         commands.poll(runtime, 10);
         reconciliation.setDesired(organization, Set.of(environment), deployment.id(), "ABSENT", "operator-test");
 
-        var persisted = ai.wayang.console.adapter.persistence.ManagementCommandEntity.findById(command.commandId());
+        ai.wayang.console.adapter.persistence.ManagementCommandEntity persisted =
+                ai.wayang.console.adapter.persistence.ManagementCommandEntity.findById(command.commandId());
         persisted.leaseUntil = Instant.now().minusSeconds(1);
         commands.finalizeUnconfirmedSupersessions();
 
