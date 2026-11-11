@@ -135,7 +135,7 @@ class PluginApprovalConcurrencyIntegrationTest {
 
         Signature signer = Signature.getInstance("Ed25519");
         signer.initSign(keyPair.getPrivate());
-        signer.update((artifactDigest + "\\n" + manifestDigest + "\\n" + keyId)
+        signer.update((artifactDigest + "\n" + manifestDigest + "\n" + keyId)
                 .getBytes(StandardCharsets.UTF_8));
         String signature = Base64.getEncoder().encodeToString(signer.sign());
         artifacts.register(organizationId, environmentId, "publisher", artifactDigest, manifestDigest,
