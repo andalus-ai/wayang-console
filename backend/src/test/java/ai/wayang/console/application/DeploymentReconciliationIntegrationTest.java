@@ -22,6 +22,7 @@ class DeploymentReconciliationIntegrationTest {
     @Inject DeploymentReconciliationService reconciliation;
     @Inject RuntimeInventoryService inventory;
     @Inject RuntimeCommandService commands;
+    @Inject AuditIntegrityService audit;
 
     @Test
     @TestTransaction
@@ -165,6 +166,72 @@ class DeploymentReconciliationIntegrationTest {
                         .find("deploymentId", deployment.id()).firstResult();
         assertNotNull(queued);
         assertTrue(queued.typedPayload.contains("\"retryAttempt\":0"));
+
+        var timeline = reconciliation.auditTimeline(org, Set.of(env), deployment.id(), 0, 20);
+        assertTrue(timeline.items().stream().anyMatch(event ->
+                "DEPLOYMENT_OPERATOR_RETRY_REQUESTED".equals(event.action())));
+        var cooldown = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> reconciliation.requestOperatorRetry(org, Set.of(env), deployment.id(),
+                        "operator:alice", "duplicate click"));
+        assertEquals(429, cooldown.getResponse().getStatus());
+    }
+
+    @Test
+    @TestTransaction
+    void reconciliationQueueIsScopedFilteredAndPaginated() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID(), otherEnv = UUID.randomUUID();
+        var firstEnrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var firstRegistration = registry.enroll(firstEnrollment.token(), "queue-a-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var firstRuntime = registry.authenticate(firstRegistration.registrationToken());
+        String digest = "sha256:" + "a".repeat(64);
+        var first = deployments.create(org, Set.of(env), firstRuntime.id(), "queue-a-" + UUID.randomUUID(),
+                "orders.flow", "1.0.0", digest, digest, "test-operator");
+        var second = deployments.create(org, Set.of(env), firstRuntime.id(), "queue-b-" + UUID.randomUUID(),
+                "payments.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), first.id(), "PRESENT", "test-operator");
+        reconciliation.setDesired(org, Set.of(env), second.id(), "PRESENT", "test-operator");
+
+        var outsideEnrollment = registry.issueEnrollmentToken(org, otherEnv, Duration.ofHours(1));
+        var outsideRegistration = registry.enroll(outsideEnrollment.token(), "queue-outside-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var outsideRuntime = registry.authenticate(outsideRegistration.registrationToken());
+        var outside = deployments.create(org, Set.of(otherEnv), outsideRuntime.id(), "queue-outside-" + UUID.randomUUID(),
+                "outside.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(otherEnv), outside.id(), "PRESENT", "test-operator");
+
+        var firstPage = reconciliation.listQueue(org, Set.of(env), "WAITING_RUNTIME", 0, 1);
+        var secondPage = reconciliation.listQueue(org, Set.of(env), "WAITING_RUNTIME", 1, 1);
+        assertEquals(2L, firstPage.total());
+        assertEquals(1, firstPage.items().size());
+        assertEquals(1, secondPage.items().size());
+        assertNotEquals(firstPage.items().get(0).deploymentId(), secondPage.items().get(0).deploymentId());
+        assertTrue(firstPage.items().stream().allMatch(item -> env.equals(item.environmentId())));
+        assertTrue(secondPage.items().stream().allMatch(item -> env.equals(item.environmentId())));
+        assertEquals(0L, reconciliation.listQueue(org, Set.of(env), "MANUAL_INTERVENTION", 0, 10).total());
+    }
+
+    @Test
+    @TestTransaction
+    void operatorRetryHourlyLimitIsDurableAndReturnsTooManyRequests() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "operator-limit-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "b".repeat(64);
+        var deployment = deployments.create(org, Set.of(env), runtime.id(), "operator-limit-" + UUID.randomUUID(),
+                "orders.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), deployment.id(), "PRESENT", "test-operator");
+        reconciliation.report(runtime, deployment.id(),
+                new DeploymentReconciliationService.Observation("FAILED", null, UUID.randomUUID(),
+                        1, 1, Instant.now(), "runtime apply failed"));
+        Instant now = Instant.now();
+        for (int i = 0; i < 5; i++) {
+            audit.append(org, env, "operator:history", "DEPLOYMENT_OPERATOR_RETRY_REQUESTED",
+                    "DEPLOYMENT", deployment.id().toString(), now.minus(Duration.ofMinutes(10 - i)), "SUCCESS");
+        }
+        var limited = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> reconciliation.requestOperatorRetry(org, Set.of(env), deployment.id(),
+                        "operator:alice", "retry after investigation"));
+        assertEquals(429, limited.getResponse().getStatus());
     }
 
     @Test

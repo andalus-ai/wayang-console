@@ -7,6 +7,8 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
 import java.util.UUID;
+import jakarta.ws.rs.DefaultValue;
+import jakarta.ws.rs.QueryParam;
 
 @Path("/api/v1/console/deployments")
 @Authenticated
@@ -38,6 +40,27 @@ public class DeploymentReconciliationResource {
         if (request == null) throw new BadRequestException("Request body is required");
         return reconciliation.requestOperatorRetry(operator.organizationId(), operator.environmentIds(),
                 deploymentId, operator.subject(), request.reason());
+    }
+
+    @GET
+    @Path("/reconciliation")
+    public DeploymentReconciliationService.ReconciliationQueuePage queue(
+            @QueryParam("state") String state,
+            @QueryParam("page") @DefaultValue("0") int page,
+            @QueryParam("size") @DefaultValue("25") int size) {
+        operator.requireRead();
+        return reconciliation.listQueue(operator.organizationId(), operator.environmentIds(), state, page, size);
+    }
+
+    @GET
+    @Path("/{deploymentId}/reconciliation/audit")
+    public DeploymentReconciliationService.AuditTimelinePage auditTimeline(
+            @PathParam("deploymentId") UUID deploymentId,
+            @QueryParam("page") @DefaultValue("0") int page,
+            @QueryParam("size") @DefaultValue("25") int size) {
+        operator.requireRead();
+        return reconciliation.auditTimeline(operator.organizationId(), operator.environmentIds(),
+                deploymentId, page, size);
     }
 
     @GET
