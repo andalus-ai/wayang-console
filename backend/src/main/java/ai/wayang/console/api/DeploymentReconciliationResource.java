@@ -1,6 +1,7 @@
 package ai.wayang.console.api;
 
 import ai.wayang.console.application.DeploymentReconciliationService;
+import ai.wayang.console.application.RuntimeCommandService;
 import ai.wayang.console.security.ConsoleOperatorContext;
 import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
@@ -17,6 +18,7 @@ import jakarta.ws.rs.QueryParam;
 public class DeploymentReconciliationResource {
     @Inject ConsoleOperatorContext operator;
     @Inject DeploymentReconciliationService reconciliation;
+    @Inject RuntimeCommandService commands;
 
     public record DesiredStateRequest(String desiredState) {}
 
@@ -60,6 +62,17 @@ public class DeploymentReconciliationResource {
             @QueryParam("size") @DefaultValue("25") int size) {
         operator.requireRead();
         return reconciliation.auditTimeline(operator.organizationId(), operator.environmentIds(),
+                deploymentId, page, size);
+    }
+
+    @GET
+    @Path("/{deploymentId}/commands")
+    public RuntimeCommandService.DeploymentCommandPage commandHistory(
+            @PathParam("deploymentId") UUID deploymentId,
+            @QueryParam("page") @DefaultValue("0") int page,
+            @QueryParam("size") @DefaultValue("25") int size) {
+        operator.requireRead();
+        return commands.listDeploymentCommands(operator.organizationId(), operator.environmentIds(),
                 deploymentId, page, size);
     }
 
