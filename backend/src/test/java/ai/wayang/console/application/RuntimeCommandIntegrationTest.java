@@ -172,6 +172,10 @@ class RuntimeCommandIntegrationTest {
         assertEquals("MANUAL_INTERVENTION",
                 reconciliation.get(organization, Set.of(environment), deployment.id()).reconciliationState());
         assertFalse(commands.dispatchDueRetry(deployment.id(), Instant.now()));
+        var resolved = commands.resolveUnconfirmedSupersession(organization, Set.of(environment),
+                deployment.id(), command.commandId(), "operator:alice", "verified runtime process is stopped");
+        assertEquals("SUPERSEDED", resolved.status());
+        assertTrue(resolved.resultMessage().contains("verified runtime process is stopped"));
     }
 
     @Test
