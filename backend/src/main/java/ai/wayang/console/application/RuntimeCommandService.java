@@ -263,17 +263,24 @@ public class RuntimeCommandService {
     @Transactional
     void finalizeUnconfirmedSupersessions() {
         Instant now = Instant.now();
-        List<ManagementCommandEntity> unconfirmed = ManagementCommandEntity.<ManagementCommandEntity>find(
+        List<UUID> candidateIds = ManagementCommandEntity.<ManagementCommandEntity>find(
                 "status = 'SUPERSESSION_REQUESTED' and (leaseUntil is null or leaseUntil <= ?1 or expiresAt <= ?1) order by supersededAt",
-                now).withLock(LockModeType.PESSIMISTIC_WRITE).range(0, 199).list();
-        for (ManagementCommandEntity command : unconfirmed) {
+                now).range(0, 199).list().stream().map(command -> command.id).toList();
+        for (UUID commandId : candidateIds) {
+            ManagementCommandEntity snapshot = ManagementCommandEntity.findById(commandId);
+            if (snapshot == null) continue;
+            DeploymentEntity.findById(snapshot.deploymentId, LockModeType.PESSIMISTIC_WRITE);
+            DeploymentReconciliationEntity reconciliation = DeploymentReconciliationEntity
+                    .<DeploymentReconciliationEntity>find("deploymentId", snapshot.deploymentId)
+                    .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
+            ManagementCommandEntity command = ManagementCommandEntity.findById(commandId, LockModeType.PESSIMISTIC_WRITE);
+            if (command == null || !"SUPERSESSION_REQUESTED".equals(command.status)
+                    || (command.leaseUntil != null && command.leaseUntil.isAfter(now)
+                            && command.expiresAt.isAfter(now))) continue;
             command.status = "SUPERSESSION_UNCONFIRMED";
             command.completedAt = now;
             command.leaseUntil = null;
             command.resultMessage = "Runtime did not confirm supersession before its lease expired; manual verification is required";
-            DeploymentReconciliationEntity reconciliation = DeploymentReconciliationEntity
-                    .<DeploymentReconciliationEntity>find("deploymentId", command.deploymentId)
-                    .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
             if (reconciliation != null && reconciliation.generation == command.supersededByGeneration) {
                 reconciliation.reconciliationState = "MANUAL_INTERVENTION";
                 reconciliation.nextAttemptAt = null;
