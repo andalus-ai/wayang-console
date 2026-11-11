@@ -164,7 +164,7 @@ class DeploymentReconciliationIntegrationTest {
                 ai.wayang.console.adapter.persistence.ManagementCommandEntity
                         .find("deploymentId", deployment.id()).firstResult();
         assertNotNull(queued);
-        assertTrue(queued.typedPayload.contains("\\\"retryAttempt\\\":0"));
+        assertTrue(queued.typedPayload.contains("\"retryAttempt\":0"));
 
         var timeline = reconciliation.auditTimeline(org, Set.of(env), deployment.id(), 0, 20);
         assertTrue(timeline.items().stream().anyMatch(event ->
