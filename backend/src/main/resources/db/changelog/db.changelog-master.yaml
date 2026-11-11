@@ -550,3 +550,30 @@ databaseChangeLog:
         - dropColumn: { tableName: wc_deployment_reconciliation, columnName: last_attempt_at }
         - dropColumn: { tableName: wc_deployment_reconciliation, columnName: next_attempt_at }
         - dropColumn: { tableName: wc_deployment_reconciliation, columnName: retry_count }
+
+  - changeSet:
+      id: 016-generation-aware-command-supersession
+      author: andalus-ai
+      changes:
+        - addColumn:
+            tableName: wc_management_command
+            columns:
+              - column: { name: generation, type: BIGINT, defaultValueNumeric: 1, constraints: { nullable: false } }
+              - column: { name: superseded_by_generation, type: BIGINT }
+              - column: { name: superseded_at, type: TIMESTAMP WITH TIME ZONE }
+        - sql:
+            sql: UPDATE wc_management_command SET generation = COALESCE((typed_payload::jsonb ->> 'generation')::BIGINT, 1)
+        - createIndex:
+            tableName: wc_management_command
+            indexName: idx_wc_command_deployment_generation_status
+            columns:
+              - column: { name: deployment_id }
+              - column: { name: generation }
+              - column: { name: status }
+      rollback:
+        - dropIndex:
+            tableName: wc_management_command
+            indexName: idx_wc_command_deployment_generation_status
+        - dropColumn: { tableName: wc_management_command, columnName: superseded_at }
+        - dropColumn: { tableName: wc_management_command, columnName: superseded_by_generation }
+        - dropColumn: { tableName: wc_management_command, columnName: generation }
