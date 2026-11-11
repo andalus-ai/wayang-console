@@ -120,3 +120,21 @@ The request requires a non-empty reason. The endpoint derives organization, envi
 Only deployments whose desired state is `PRESENT` and whose observed state is `FAILED`, or whose reconciliation state is `MANUAL_INTERVENTION`, are eligible. `ABSENT` and `ROLLBACK` are never retried by this endpoint. A newer desired generation clears scheduled retry metadata; stale observations remain rejected by the generation check. The runtime must also enforce generation fencing when applying commands, because a command already delivered before supersession cannot be recalled reliably by the Console alone.
 
 The operator retry integration test covers the FAILED-to-MANUAL_INTERVENTION transition and the audited retry scheduling path. Authorization and organization/environment isolation are enforced by the existing authenticated operator context and scoped service lookup.
+
+## M1.10.5 — reconciliation operations
+
+The Console exposes a read-only, tenant/environment-scoped recovery queue:
+
+`GET /api/v1/console/deployments/reconciliation?state=WAITING_RUNTIME&page=0&size=25`
+
+Supported `state` filters are `IN_SYNC`, `DRIFTED`, `WAITING_RUNTIME`, `RETRYING`, and `MANUAL_INTERVENTION`. The default page size is 25 and the maximum is 100. Results are ordered by most recently updated and include deployment identity, environment/runtime, workflow metadata, desired generation, observed state, retry schedule, and reconciliation diagnostics. Scope is derived from the authenticated operator; organization/environment identifiers are never accepted from query parameters.
+
+A deployment's immutable audit timeline is available through:
+
+`GET /api/v1/console/deployments/{deploymentId}/reconciliation/audit?page=0&size=25`
+
+It reads the existing audit chain and returns the sequence, timestamp, actor, action, outcome, and record hash. It does not create a second retry-history store.
+
+Operator retry requests are rate-limited using the durable audit chain: at least 30 seconds between retries and no more than five operator retry requests per deployment in a rolling hour. The deployment row is locked while checking the policy and appending the audit event, so concurrent requests cannot bypass the per-deployment guard. A rejected request returns HTTP 429 without changing reconciliation state.
+
+The Console does not cancel already-delivered or running runtime commands as part of queue visibility. Generation supersession remains visible through the current desired generation and runtime-observed generation checks; runtime-side fencing is still required for commands already delivered before a newer desired state.
