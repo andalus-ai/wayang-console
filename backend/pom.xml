@@ -11,6 +11,8 @@
   </properties>
   <dependencyManagement><dependencies><dependency>
     <groupId>${quarkus.platform.group-id}</groupId><artifactId>${quarkus.platform.artifact-id}</artifactId><version>${quarkus.platform.version}</version><type>pom</type><scope>import</scope>
+  </dependency><dependency>
+    <groupId>org.testcontainers</groupId><artifactId>testcontainers-bom</artifactId><version>1.21.4</version><type>pom</type><scope>import</scope>
   </dependency></dependencies></dependencyManagement>
   <dependencies>
     <dependency><groupId>io.quarkus</groupId><artifactId>quarkus-rest-jackson</artifactId></dependency>
