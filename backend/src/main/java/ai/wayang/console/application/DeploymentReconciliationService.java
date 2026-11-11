@@ -54,6 +54,13 @@ public class DeploymentReconciliationService {
             row = new DeploymentReconciliationEntity();
             row.id = UUID.randomUUID(); row.deploymentId = deploymentId;
             row.generation = 1; row.observedState = "UNKNOWN"; row.reportSequence = 0;
+            long undeliveredOrActive = ManagementCommandEntity.count(
+                    "deploymentId = ?1 and generation = 1 and status in ('PENDING','LEASED','RUNNING')",
+                    deployment.id);
+            if (!"PRESENT".equals(desired) && undeliveredOrActive > 0) {
+                row.generation = 2;
+                supersedeOlderCommands(deployment, 1L, 2L, now, actor);
+            }
         } else if (!row.desiredState.equals(desired)) {
             long previousGeneration = row.generation;
             row.generation++;
@@ -268,6 +275,11 @@ public class DeploymentReconciliationService {
             throw new WebApplicationException("Operator retry requires a FAILED observation or manual-intervention state", 409);
         if (deployment.runtimeId == null)
             throw new WebApplicationException("Deployment has no target runtime", 409);
+        long unresolvedSupersessions = ManagementCommandEntity.count(
+                "deploymentId = ?1 and status in ('SUPERSESSION_REQUESTED','SUPERSESSION_UNCONFIRMED')",
+                deploymentId);
+        if (unresolvedSupersessions > 0)
+            throw new WebApplicationException("An older command has unconfirmed supersession; resolve it before retrying", 409);
         Instant now = Instant.now();
         Instant cooldownBoundary = now.minusSeconds(30);
         AuditRecordEntity previousRetry = AuditRecordEntity.<AuditRecordEntity>find(
