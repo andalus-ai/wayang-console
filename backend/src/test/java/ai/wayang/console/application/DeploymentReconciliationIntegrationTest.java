@@ -160,8 +160,9 @@ class DeploymentReconciliationIntegrationTest {
         assertNotNull(retry.nextAttemptAt());
         assertTrue(retry.diagnostic().contains("runtime capacity restored"));
         assertTrue(commands.dispatchDueRetry(deployment.id(), retry.nextAttemptAt()));
-        var queued = ai.wayang.console.adapter.persistence.ManagementCommandEntity
-                .find("deploymentId", deployment.id()).firstResult();
+        ai.wayang.console.adapter.persistence.ManagementCommandEntity queued =
+                ai.wayang.console.adapter.persistence.ManagementCommandEntity
+                        .find("deploymentId", deployment.id()).firstResult();
         assertNotNull(queued);
         assertTrue(queued.typedPayload.contains("\"retryAttempt\":0"));
     }
