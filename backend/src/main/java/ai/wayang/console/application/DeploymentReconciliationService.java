@@ -1,6 +1,7 @@
 package ai.wayang.console.application;
 
 import ai.wayang.console.adapter.persistence.DeploymentEntity;
+import ai.wayang.console.adapter.persistence.AuditRecordEntity;
 import ai.wayang.console.adapter.persistence.DeploymentReconciliationEntity;
 import ai.wayang.console.adapter.persistence.RuntimeInstanceEntity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -14,6 +15,9 @@ import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.Set;
+import java.util.Map;
+import java.util.HashMap;
+import io.quarkus.panache.common.Page;
 
 @ApplicationScoped
 public class DeploymentReconciliationService {
@@ -28,6 +32,13 @@ public class DeploymentReconciliationService {
             int retryCount, Instant nextAttemptAt, Instant lastAttemptAt) {}
     public record Observation(String state, String artifactDigest, UUID commandId,
             long generation, long sequence, Instant observedAt, String diagnostic) {}
+    public record ReconciliationQueueItem(UUID deploymentId, String deploymentKey, UUID environmentId,
+            UUID runtimeId, String workflowId, String workflowVersion, String deploymentStatus,
+            ReconciliationView reconciliation) {}
+    public record ReconciliationQueuePage(List<ReconciliationQueueItem> items, long total, int page, int size) {}
+    public record AuditEventView(long sequence, Instant occurredAt, String actor, String action,
+            String outcome, String recordHash) {}
+    public record AuditTimelinePage(List<AuditEventView> items, long total, int page, int size) {}
 
     @Transactional
     public ReconciliationView setDesired(UUID organizationId, Set<UUID> environments,
@@ -147,6 +158,66 @@ public class DeploymentReconciliationService {
         return Duration.ofSeconds(seconds);
     }
 
+    /**
+     * Tenant/environment-scoped operational queue. The scope is applied through the
+     * deployment relation so reconciliation rows cannot be enumerated cross-tenant.
+     */
+    @Transactional
+    public ReconciliationQueuePage listQueue(UUID organizationId, Set<UUID> environments,
+            String state, int page, int size) {
+        validatePage(page, size);
+        if (environments == null || environments.isEmpty())
+            return new ReconciliationQueuePage(List.of(), 0, page, size);
+        String normalizedState = state == null || state.isBlank() ? null
+                : normalize(state, "IN_SYNC", "DRIFTED", "WAITING_RUNTIME", "RETRYING", "MANUAL_INTERVENTION");
+        String base = "deploymentId in (select d.id from DeploymentEntity d "
+                + "where d.organizationId = ?1 and d.environmentId in ?2)";
+        if (normalizedState != null) base += " and reconciliationState = ?3";
+        String ordered = base + " order by updatedAt desc";
+        var query = normalizedState == null
+                ? DeploymentReconciliationEntity.find(ordered, organizationId, environments)
+                : DeploymentReconciliationEntity.find(ordered, organizationId, environments, normalizedState);
+        long total = query.count();
+        List<DeploymentReconciliationEntity> rows = query.page(Page.of(page, size)).list();
+        if (rows.isEmpty()) return new ReconciliationQueuePage(List.of(), total, page, size);
+        List<UUID> ids = rows.stream().map(row -> row.deploymentId).toList();
+        Map<UUID, DeploymentEntity> deploymentsById = new HashMap<>();
+        DeploymentEntity.<DeploymentEntity>list("id in ?1", ids)
+                .forEach(deployment -> deploymentsById.put(deployment.id, deployment));
+        List<ReconciliationQueueItem> items = rows.stream().map(row -> {
+            DeploymentEntity deployment = deploymentsById.get(row.deploymentId);
+            if (deployment == null) return null;
+            return new ReconciliationQueueItem(deployment.id, deployment.deploymentId,
+                    deployment.environmentId, deployment.runtimeId, deployment.workflowId,
+                    deployment.workflowVersion, deployment.status, view(row));
+        }).filter(java.util.Objects::nonNull).toList();
+        return new ReconciliationQueuePage(items, total, page, size);
+    }
+
+    /** Read-only audit timeline backed by the existing tamper-evident audit chain. */
+    @Transactional
+    public AuditTimelinePage auditTimeline(UUID organizationId, Set<UUID> environments,
+            UUID deploymentId, int page, int size) {
+        validatePage(page, size);
+        scoped(deploymentId, organizationId, environments);
+        String resourceId = deploymentId.toString();
+        String filter = "organizationId = ?1 and environmentId in ?2 and resourceType = 'DEPLOYMENT' "
+                + "and resourceId = ?3";
+        long total = AuditRecordEntity.count(filter, organizationId, environments, resourceId);
+        List<AuditRecordEntity> records = AuditRecordEntity.<AuditRecordEntity>find(
+                filter + " order by sequenceNo desc", organizationId, environments, resourceId)
+                .page(Page.of(page, size)).list();
+        List<AuditEventView> items = records.stream().map(record -> new AuditEventView(
+                record.sequenceNo == null ? 0L : record.sequenceNo, record.occurredAt,
+                record.actorSubject, record.action, record.outcome, record.recordHash)).toList();
+        return new AuditTimelinePage(items, total, page, size);
+    }
+
+    private static void validatePage(int page, int size) {
+        if (page < 0 || size < 1 || size > 100)
+            throw new IllegalArgumentException("page must be >= 0 and size must be 1..100");
+    }
+
     /** Operator-authorized retry after a runtime failure or exhausted automatic recovery. */
     @Transactional
     public ReconciliationView requestOperatorRetry(UUID organizationId, Set<UUID> environments,
@@ -166,6 +237,21 @@ public class DeploymentReconciliationService {
         if (deployment.runtimeId == null)
             throw new WebApplicationException("Deployment has no target runtime", 409);
         Instant now = Instant.now();
+        Instant cooldownBoundary = now.minusSeconds(30);
+        AuditRecordEntity previousRetry = AuditRecordEntity.<AuditRecordEntity>find(
+                "organizationId = ?1 and environmentId = ?2 and resourceType = 'DEPLOYMENT' "
+                        + "and resourceId = ?3 and action = 'DEPLOYMENT_OPERATOR_RETRY_REQUESTED' "
+                        + "order by occurredAt desc",
+                deployment.organizationId, deployment.environmentId, deployment.id.toString()).firstResult();
+        if (previousRetry != null && previousRetry.occurredAt.isAfter(cooldownBoundary))
+            throw new WebApplicationException("Operator retry is cooling down; wait 30 seconds between requests", 429);
+        long retriesInWindow = AuditRecordEntity.count(
+                "organizationId = ?1 and environmentId = ?2 and resourceType = 'DEPLOYMENT' "
+                        + "and resourceId = ?3 and action = 'DEPLOYMENT_OPERATOR_RETRY_REQUESTED' "
+                        + "and occurredAt >= ?4",
+                deployment.organizationId, deployment.environmentId, deployment.id.toString(), now.minus(Duration.ofHours(1)));
+        if (retriesInWindow >= 5)
+            throw new WebApplicationException("Operator retry limit reached; maximum is 5 per deployment per hour", 429);
         row.retryCount = 0;
         row.nextAttemptAt = now;
         row.reconciliationState = "RETRYING";
