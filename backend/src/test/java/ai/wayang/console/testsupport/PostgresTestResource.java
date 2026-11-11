@@ -18,7 +18,9 @@ public class PostgresTestResource implements QuarkusTestResourceLifecycleManager
                 "quarkus.datasource.jdbc.url", postgres.getJdbcUrl(),
                 "quarkus.datasource.username", postgres.getUsername(),
                 "quarkus.datasource.password", postgres.getPassword(),
-                "quarkus.liquibase.migrate-at-start", "true"
+                "quarkus.liquibase.migrate-at-start", "true",
+                // Non-empty sentinel satisfies required config injection; tests register managed publisher keys.
+                "wayang.console.artifacts.signing-key-id", "test-only-unmanaged-key"
         );
     }
 
