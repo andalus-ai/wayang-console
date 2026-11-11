@@ -144,6 +144,37 @@ class RuntimeCommandIntegrationTest {
 
     @Test
     @TestTransaction
+    void unconfirmedSupersessionRequiresManualInterventionAfterLeaseExpiry() {
+        UUID organization = UUID.randomUUID(), environment = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(organization, environment, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "unconfirmed-supersede-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        inventory.replaceInventory(runtime.id(),
+                java.util.List.of(new RuntimeInventoryService.CapabilityInput("wayang.runtime", "1.2.0", "workflow.execute")),
+                java.util.List.of());
+        String digest = "sha256:" + "8".repeat(64);
+        var deployment = deployments.create(organization, Set.of(environment), runtime.id(),
+                "unconfirmed-supersede-" + UUID.randomUUID(), "orders.flow", "1.0.0", digest, digest, "operator-test");
+        deployments.transition(organization, Set.of(environment), deployment.id(), "VALIDATING", null, "operator-test");
+        deployments.transition(organization, Set.of(environment), deployment.id(), "READY", null, "operator-test");
+        reconciliation.setDesired(organization, Set.of(environment), deployment.id(), "PRESENT", "operator-test");
+        var command = commands.dispatch(organization, Set.of(environment), deployment.id(), "operator-test");
+        commands.poll(runtime, 10);
+        reconciliation.setDesired(organization, Set.of(environment), deployment.id(), "ABSENT", "operator-test");
+
+        var persisted = ai.wayang.console.adapter.persistence.ManagementCommandEntity.findById(command.commandId());
+        persisted.leaseUntil = Instant.now().minusSeconds(1);
+        commands.finalizeUnconfirmedSupersessions();
+
+        var history = commands.listDeploymentCommands(organization, Set.of(environment), deployment.id(), 0, 10);
+        assertEquals("SUPERSESSION_UNCONFIRMED", history.items().getFirst().status());
+        assertEquals("MANUAL_INTERVENTION",
+                reconciliation.get(organization, Set.of(environment), deployment.id()).reconciliationState());
+        assertFalse(commands.dispatchDueRetry(deployment.id(), Instant.now()));
+    }
+
+    @Test
+    @TestTransaction
     void runningCommandCompletionAfterSupersessionCannotMarkNewGenerationDeployed() {
         UUID organization = UUID.randomUUID(), environment = UUID.randomUUID();
         var enrollment = registry.issueEnrollmentToken(organization, environment, Duration.ofHours(1));
