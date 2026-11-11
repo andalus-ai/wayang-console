@@ -259,6 +259,37 @@ public class RuntimeCommandService {
         return new DeploymentCommandPage(items, total, page, size);
     }
 
+    @Transactional
+    public DeploymentCommandView resolveUnconfirmedSupersession(UUID organizationId, Set<UUID> environments,
+            UUID deploymentId, UUID commandId, String actor, String reason) {
+        String rationale = required(reason, "reason");
+        if (rationale.length() > 500)
+            throw new IllegalArgumentException("reason must be 500 characters or fewer");
+        DeploymentEntity deployment = scopedDeployment(organizationId, environments, deploymentId, true);
+        DeploymentReconciliationEntity reconciliation = DeploymentReconciliationEntity
+                .<DeploymentReconciliationEntity>find("deploymentId", deploymentId)
+                .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
+        ManagementCommandEntity command = ManagementCommandEntity.findById(commandId, LockModeType.PESSIMISTIC_WRITE);
+        if (command == null || !deployment.id.equals(command.deploymentId))
+            throw new NotFoundException("Command not found");
+        if (!"SUPERSESSION_UNCONFIRMED".equals(command.status)
+                || reconciliation == null
+                || !java.util.Objects.equals(command.supersededByGeneration, reconciliation.generation))
+            throw new WebApplicationException("Command is not an unresolved supersession for the current generation", 409);
+        Instant now = Instant.now();
+        command.status = "SUPERSEDED";
+        command.completedAt = now;
+        command.leaseUntil = null;
+        command.resultMessage = "Operator verified superseded command is no longer executing: " + bounded(rationale, 500);
+        audit.append(deployment.organizationId, deployment.environmentId, actor,
+                "DEPLOYMENT_COMMAND_SUPERSESSION_OPERATOR_RESOLVED", "MANAGEMENT_COMMAND",
+                command.id.toString(), now, "SUCCESS");
+        return new DeploymentCommandView(command.id, command.generation, command.supersededByGeneration,
+                command.commandType, command.status, command.createdAt, command.lastDeliveredAt,
+                command.acknowledgedAt, command.completedAt, command.supersededAt, command.expiresAt,
+                command.attemptCount, command.resultMessage);
+    }
+
     @Scheduled(every = "30s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     @Transactional
     void finalizeUnconfirmedSupersessions() {
