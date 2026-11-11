@@ -22,6 +22,7 @@ class DeploymentReconciliationIntegrationTest {
     @Inject DeploymentReconciliationService reconciliation;
     @Inject RuntimeInventoryService inventory;
     @Inject RuntimeCommandService commands;
+    @Inject AuditIntegrityService audit;
 
     @Test
     @TestTransaction
@@ -206,6 +207,31 @@ class DeploymentReconciliationIntegrationTest {
         assertTrue(firstPage.items().stream().allMatch(item -> env.equals(item.environmentId())));
         assertTrue(secondPage.items().stream().allMatch(item -> env.equals(item.environmentId())));
         assertEquals(0L, reconciliation.listQueue(org, Set.of(env), "MANUAL_INTERVENTION", 0, 10).total());
+    }
+
+    @Test
+    @TestTransaction
+    void operatorRetryHourlyLimitIsDurableAndReturnsTooManyRequests() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "operator-limit-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "b".repeat(64);
+        var deployment = deployments.create(org, Set.of(env), runtime.id(), "operator-limit-" + UUID.randomUUID(),
+                "orders.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), deployment.id(), "PRESENT", "test-operator");
+        reconciliation.report(runtime, deployment.id(),
+                new DeploymentReconciliationService.Observation("FAILED", null, UUID.randomUUID(),
+                        1, 1, Instant.now(), "runtime apply failed"));
+        Instant now = Instant.now();
+        for (int i = 0; i < 5; i++) {
+            audit.append(org, env, "operator:history", "DEPLOYMENT_OPERATOR_RETRY_REQUESTED",
+                    "DEPLOYMENT", deployment.id().toString(), now.minus(Duration.ofMinutes(10 - i)), "SUCCESS");
+        }
+        var limited = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> reconciliation.requestOperatorRetry(org, Set.of(env), deployment.id(),
+                        "operator:alice", "retry after investigation"));
+        assertEquals(429, limited.getResponse().getStatus());
     }
 
     @Test
