@@ -16,6 +16,9 @@ public class ManagementCommandEntity extends PanacheEntityBase {
     @Column(name = "organization_id", nullable = false) public UUID organizationId;
     @Column(name = "environment_id", nullable = false) public UUID environmentId;
     @Column(name = "deployment_id", nullable = false) public UUID deploymentId;
+    @Column(name = "generation", nullable = false) public long generation;
+    @Column(name = "superseded_by_generation") public Long supersededByGeneration;
+    @Column(name = "superseded_at") public Instant supersededAt;
     @Column(name = "idempotency_key", nullable = false, length = 220) public String idempotencyKey;
     @Column(name = "command_type", nullable = false, length = 64) public String commandType;
     @Column(name = "typed_payload", nullable = false, columnDefinition = "TEXT") public String typedPayload;
