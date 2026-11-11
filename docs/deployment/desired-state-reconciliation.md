@@ -138,3 +138,22 @@ It reads the existing audit chain and returns the sequence, timestamp, actor, ac
 Operator retry requests are rate-limited using the durable audit chain: at least 30 seconds between retries and no more than five operator retry requests per deployment in a rolling hour. The deployment row is locked while checking the policy and appending the audit event, so concurrent requests cannot bypass the per-deployment guard. A rejected request returns HTTP 429 without changing reconciliation state.
 
 The Console does not cancel already-delivered or running runtime commands as part of queue visibility. Generation supersession remains visible through the current desired generation and runtime-observed generation checks; runtime-side fencing is still required for commands already delivered before a newer desired state.
+
+## M1.10.6 — generation-aware command supersession
+
+Management commands now persist their desired-state generation as a first-class column, with the generation backfilled from the existing typed payload during migration. The Console exposes paginated deployment command history at:
+
+`GET /api/v1/console/deployments/{deploymentId}/commands?page=0&size=25`
+
+The history includes command generation, status, delivery/acknowledgement/completion timestamps, supersession generation/time, attempts, and bounded result message. Access uses the authenticated operator's organization/environment scope.
+
+When desired state changes and its generation increments, commands from older generations are handled according to delivery state:
+
+- `PENDING`: atomically marked `SUPERSEDED`; it is no longer eligible for runtime polling.
+- `LEASED` or `RUNNING`: marked `SUPERSESSION_REQUESTED`; the Console does not claim it can recall work already delivered or executing. The runtime must cooperatively stop/discard it and acknowledge `SUPERSEDED`.
+- If the runtime reports success/failure after the supersession request, the command is recorded as `STALE_SUCCEEDED` or `STALE_FAILED`. That late result is auditable but cannot mutate the current deployment lifecycle.
+- If the command lease expires without a runtime acknowledgement, it becomes `SUPERSESSION_UNCONFIRMED` and the current reconciliation generation moves to `MANUAL_INTERVENTION`. The Console does not automatically dispatch over an unconfirmed older operation.
+
+The runtime acknowledgement endpoint accepts `SUPERSEDED` only when supersession was requested. A `STARTED` acknowledgement after that request is rejected with HTTP 409. Existing runtimes must implement this cooperative acknowledgement to complete the supersession handshake. Generation is also checked before applying terminal acknowledgement effects, so an older command cannot mark a newer generation deployed or failed.
+
+The generation change and command-state transition share the desired-state transaction. Runtime acknowledgements acquire locks in the same deployment → reconciliation → command order to avoid lock-order inversion. This is still at-least-once command delivery; runtime-side generation fencing and idempotent execution remain required.
