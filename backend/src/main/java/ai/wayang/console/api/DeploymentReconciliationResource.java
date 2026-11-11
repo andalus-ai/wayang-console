@@ -65,6 +65,20 @@ public class DeploymentReconciliationResource {
                 deploymentId, page, size);
     }
 
+    public record SupersessionResolutionRequest(String reason) {}
+
+    @POST
+    @Path("/{deploymentId}/commands/{commandId}/resolve-supersession")
+    public RuntimeCommandService.DeploymentCommandView resolveSupersession(
+            @PathParam("deploymentId") UUID deploymentId,
+            @PathParam("commandId") UUID commandId,
+            SupersessionResolutionRequest request) {
+        operator.requireAdmin();
+        if (request == null) throw new BadRequestException("Request body is required");
+        return commands.resolveUnconfirmedSupersession(operator.organizationId(), operator.environmentIds(),
+                deploymentId, commandId, operator.subject(), request.reason());
+    }
+
     @GET
     @Path("/{deploymentId}/commands")
     public RuntimeCommandService.DeploymentCommandPage commandHistory(
