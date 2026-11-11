@@ -173,7 +173,7 @@ public class DeploymentReconciliationService {
         String base = "deploymentId in (select d.id from DeploymentEntity d "
                 + "where d.organizationId = ?1 and d.environmentId in ?2)";
         if (normalizedState != null) base += " and reconciliationState = ?3";
-        String ordered = base + " order by updatedAt desc";
+        String ordered = base + " order by updatedAt desc, deploymentId asc";
         var query = normalizedState == null
                 ? DeploymentReconciliationEntity.find(ordered, organizationId, environments)
                 : DeploymentReconciliationEntity.find(ordered, organizationId, environments, normalizedState);
