@@ -157,3 +157,9 @@ When desired state changes and its generation increments, commands from older ge
 The runtime acknowledgement endpoint accepts `SUPERSEDED` only when supersession was requested. A `STARTED` acknowledgement after that request is rejected with HTTP 409. Existing runtimes must implement this cooperative acknowledgement to complete the supersession handshake. Generation is also checked before applying terminal acknowledgement effects, so an older command cannot mark a newer generation deployed or failed.
 
 The generation change and command-state transition share the desired-state transaction. Runtime acknowledgements acquire locks in the same deployment → reconciliation → command order to avoid lock-order inversion. This is still at-least-once command delivery; runtime-side generation fencing and idempotent execution remain required.
+
+An administrator can resolve an `SUPERSESSION_UNCONFIRMED` command only after independently verifying that the old runtime operation is no longer executing:
+
+`POST /api/v1/console/deployments/{deploymentId}/commands/{commandId}/resolve-supersession`
+
+The request requires a reason and is appended to the audit chain. This is an explicit human assertion, not a remote cancellation signal. Until the command is runtime-confirmed or operator-resolved, retry dispatch remains blocked.
