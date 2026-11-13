@@ -8,6 +8,7 @@ import jakarta.persistence.LockModeType;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.*;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -43,7 +44,7 @@ public class PluginApprovalService {
             if ("PENDING".equals(current.approvalStatus)) return view(current);
             throw new WebApplicationException("Approval is final for this catalog version; publish a new version to resubmit", 409);
         }
-        Instant now = Instant.now();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         PluginApprovalEntity state = new PluginApprovalEntity();
         state.id = UUID.randomUUID(); state.catalogEntryId = entry.id; state.organizationId = org;
         state.environmentId = env; state.approvalStatus = "PENDING"; state.requestedBy = actor;
