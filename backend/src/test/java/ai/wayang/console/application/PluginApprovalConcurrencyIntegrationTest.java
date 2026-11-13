@@ -116,6 +116,99 @@ class PluginApprovalConcurrencyIntegrationTest {
         assertEquals("APPROVED", history.get(1).toStatus());
     }
 
+    @Test
+    void concurrentOpposingDecisionsPersistExactlyOneTerminalOutcome() throws Exception {
+        PreparedApproval prepared = prepareCatalogEntry();
+        PluginApprovalService.ApprovalView initial = approvals.request(
+                prepared.organizationId(), prepared.environmentId(), prepared.pluginId(),
+                prepared.version(), "operator-a");
+        assertEquals("PENDING", initial.status());
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            Future<DecisionOutcome> approve = executor.submit(
+                    () -> decisionOutcomeAfterBarrier(ready, start, prepared, "reviewer-approve", "APPROVE"));
+            Future<DecisionOutcome> reject = executor.submit(
+                    () -> decisionOutcomeAfterBarrier(ready, start, prepared, "reviewer-reject", "REJECT"));
+
+            assertTrue(ready.await(10, TimeUnit.SECONDS), "Both decision workers should be ready");
+            start.countDown();
+
+            DecisionOutcome approveOutcome = approve.get(30, TimeUnit.SECONDS);
+            DecisionOutcome rejectOutcome = reject.get(30, TimeUnit.SECONDS);
+            assertEquals(1, (approveOutcome.succeeded() ? 1 : 0) + (rejectOutcome.succeeded() ? 1 : 0),
+                    "Exactly one competing decision must succeed");
+            assertEquals(1, (approveOutcome.conflicted() ? 1 : 0) + (rejectOutcome.conflicted() ? 1 : 0),
+                    "The losing decision must receive HTTP 409");
+        } finally {
+            start.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        PluginApprovalService.ApprovalView persisted = approvals.get(
+                prepared.organizationId(), prepared.environmentId(), prepared.pluginId(), prepared.version());
+        assertTrue("APPROVED".equals(persisted.status()) || "REJECTED".equals(persisted.status()),
+                "The approval must have exactly one terminal status");
+        assertTrue("reviewer-approve".equals(persisted.decidedBy())
+                        || "reviewer-reject".equals(persisted.decidedBy()),
+                "The persisted decision must belong to one of the competing reviewers");
+
+        assertPersistedCounts(prepared.catalogEntryId(), 1L, 1L,
+                "APPROVED".equals(persisted.status()) ? 1L : 0L);
+        assertTerminalDecisionCounts(prepared.catalogEntryId(),
+                "APPROVED".equals(persisted.status()) ? 1L : 0L,
+                "REJECTED".equals(persisted.status()) ? 1L : 0L);
+
+        var history = approvals.history(prepared.organizationId(), prepared.environmentId(),
+                prepared.pluginId(), prepared.version());
+        assertEquals(2, history.size(), "Only the initial request and winning decision may be recorded");
+        assertNull(history.get(0).fromStatus());
+        assertEquals("PENDING", history.get(0).toStatus());
+        assertEquals("PENDING", history.get(1).fromStatus());
+        assertEquals(persisted.status(), history.get(1).toStatus());
+        assertEquals(persisted.decidedBy(), history.get(1).actor());
+    }
+
+    private DecisionOutcome decisionOutcomeAfterBarrier(
+            CountDownLatch ready, CountDownLatch start, PreparedApproval prepared,
+            String actor, String action) throws Exception {
+        awaitStart(ready, start);
+        try {
+            PluginApprovalService.ApprovalView result = approvals.decide(
+                    prepared.organizationId(), prepared.environmentId(), prepared.pluginId(),
+                    prepared.version(), actor,
+                    new PluginApprovalService.Decision(action, "Competing decision concurrency test"));
+            assertEquals(action.equals("APPROVE") ? "APPROVED" : "REJECTED", result.status());
+            return new DecisionOutcome(true, false);
+        } catch (WebApplicationException conflict) {
+            assertEquals(409, conflict.getResponse().getStatus());
+            return new DecisionOutcome(false, true);
+        }
+    }
+
+    private void assertTerminalDecisionCounts(UUID catalogEntryId,
+            long approvedEventsExpected, long rejectedEventsExpected) {
+        AtomicLong approvedEventCount = new AtomicLong();
+        AtomicLong rejectedEventCount = new AtomicLong();
+        QuarkusTransaction.requiringNew().run(() -> {
+            approvedEventCount.set(PluginApprovalEventEntity.count(
+                    "catalogEntryId = ?1 and fromStatus = ?2 and toStatus = ?3",
+                    catalogEntryId, "PENDING", "APPROVED"));
+            rejectedEventCount.set(PluginApprovalEventEntity.count(
+                    "catalogEntryId = ?1 and fromStatus = ?2 and toStatus = ?3",
+                    catalogEntryId, "PENDING", "REJECTED"));
+        });
+        assertEquals(approvedEventsExpected, approvedEventCount.get(),
+                "There must be no duplicate or competing APPROVED transition");
+        assertEquals(rejectedEventsExpected, rejectedEventCount.get(),
+                "There must be no duplicate or competing REJECTED transition");
+        assertEquals(1L, approvedEventCount.get() + rejectedEventCount.get(),
+                "Exactly one terminal decision event must be persisted");
+    }
+
     private PreparedApproval prepareCatalogEntry() throws Exception {
         UUID organizationId = UUID.randomUUID();
         UUID environmentId = UUID.randomUUID();
@@ -218,4 +311,6 @@ class PluginApprovalConcurrencyIntegrationTest {
             String version, UUID catalogEntryId) {}
 
     private record RetryOutcome(boolean pendingReturned, boolean conflictReturned) {}
+
+    private record DecisionOutcome(boolean succeeded, boolean conflicted) {}
 }
