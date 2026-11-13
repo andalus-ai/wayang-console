@@ -10,6 +10,7 @@ import jakarta.inject.Inject;
 import jakarta.persistence.LockModeType;
 import jakarta.transaction.Transactional;
 import io.quarkus.scheduler.Scheduled;
+import io.quarkus.panache.common.Page;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.WebApplicationException;
 import java.time.Duration;
@@ -32,6 +33,11 @@ public class RuntimeCommandService {
             String typedPayload, Instant expiresAt, int attemptCount) {}
     public record CommandPage(List<CommandView> commands) {}
     public record AckView(UUID commandId, String status, boolean accepted, Instant completedAt, String verifiedArtifactDigest) {}
+    public record DeploymentCommandView(UUID commandId, long generation, Long supersededByGeneration,
+            String commandType, String status, Instant createdAt, Instant lastDeliveredAt,
+            Instant acknowledgedAt, Instant completedAt, Instant supersededAt, Instant expiresAt,
+            int attemptCount, String resultMessage) {}
+    public record DeploymentCommandPage(List<DeploymentCommandView> items, long total, int page, int size) {}
 
     @Transactional
     public CommandView dispatch(UUID organizationId, Set<UUID> environments,
@@ -63,6 +69,7 @@ public class RuntimeCommandService {
         command.organizationId = deployment.organizationId;
         command.environmentId = deployment.environmentId;
         command.deploymentId = deployment.id;
+        command.generation = generation;
         command.idempotencyKey = idempotencyKey;
         command.commandType = "APPLY_DEPLOYMENT";
         command.typedPayload = payload(deployment, generation);
@@ -122,6 +129,16 @@ public class RuntimeCommandService {
     @Transactional
     public AckView acknowledge(RuntimeRegistryService.AuthenticatedRuntime runtime,
             UUID commandId, String requestedStatus, String message, String verifiedArtifactDigest) {
+        ManagementCommandEntity snapshot = ManagementCommandEntity.findById(commandId);
+        if (snapshot == null || !snapshot.runtimeId.equals(runtime.id())
+                || !snapshot.organizationId.equals(runtime.organizationId())
+                || !snapshot.environmentId.equals(runtime.environmentId()))
+            throw new NotFoundException("Command not found");
+        // Keep lock order aligned with desired-state changes: deployment, reconciliation, command.
+        DeploymentEntity.findById(snapshot.deploymentId, LockModeType.PESSIMISTIC_WRITE);
+        DeploymentReconciliationEntity reconciliation = DeploymentReconciliationEntity
+                .<DeploymentReconciliationEntity>find("deploymentId", snapshot.deploymentId)
+                .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
         ManagementCommandEntity command = ManagementCommandEntity.findById(commandId, LockModeType.PESSIMISTIC_WRITE);
         if (command == null || !command.runtimeId.equals(runtime.id())
                 || !command.organizationId.equals(runtime.organizationId())
@@ -129,15 +146,49 @@ public class RuntimeCommandService {
             throw new NotFoundException("Command not found");
 
         String status = required(requestedStatus, "status").toUpperCase();
-        if (!Set.of("STARTED", "SUCCEEDED", "FAILED").contains(status))
-            throw new WebApplicationException("status must be STARTED, SUCCEEDED, or FAILED", 400);
+        if (!Set.of("STARTED", "SUCCEEDED", "FAILED", "SUPERSEDED").contains(status))
+            throw new WebApplicationException("status must be STARTED, SUCCEEDED, FAILED, or SUPERSEDED", 400);
 
-        if ("SUCCEEDED".equals(command.status) || "FAILED".equals(command.status) || "EXPIRED".equals(command.status)) {
-            boolean same = ("SUCCEEDED".equals(status) && "SUCCEEDED".equals(command.status))
-                    || ("FAILED".equals(status) && "FAILED".equals(command.status));
+        if (isTerminal(command.status)) {
+            boolean same = ("SUCCEEDED".equals(status) && Set.of("SUCCEEDED", "STALE_SUCCEEDED").contains(command.status))
+                    || ("FAILED".equals(status) && Set.of("FAILED", "STALE_FAILED").contains(command.status))
+                    || ("SUPERSEDED".equals(status) && "SUPERSEDED".equals(command.status));
             return new AckView(command.id, command.status, same, command.completedAt, command.verifiedArtifactDigest);
         }
         Instant now = Instant.now();
+        if ("SUPERSESSION_REQUESTED".equals(command.status)) {
+            if ("STARTED".equals(status))
+                throw new WebApplicationException("Command supersession was requested; runtime must stop or report its terminal result", 409);
+            if ("SUPERSEDED".equals(status)) {
+                command.status = "SUPERSEDED";
+                command.completedAt = now;
+                command.leaseUntil = null;
+                command.resultMessage = bounded(message == null ? "Runtime confirmed command supersession" : message, 1000);
+                audit.append(command.organizationId, command.environmentId, "runtime:" + runtime.id(),
+                        "DEPLOYMENT_COMMAND_SUPERSESSION_CONFIRMED", "MANAGEMENT_COMMAND", command.id.toString(), now, "SUCCESS");
+                return new AckView(command.id, command.status, true, command.completedAt, command.verifiedArtifactDigest);
+            }
+            // A command that completed while the supersession request was in flight is
+            // retained as stale evidence and must not mutate the current deployment.
+            if ("SUCCEEDED".equals(status)) {
+                DeploymentEntity target = DeploymentEntity.findById(command.deploymentId);
+                String verified = verifiedArtifactDigest == null ? "" : verifiedArtifactDigest.trim().toLowerCase();
+                if (target == null || !verified.matches("sha256:[0-9a-f]{64}")
+                        || !target.artifactDigest.equalsIgnoreCase(verified))
+                    throw new WebApplicationException("Successful deployment acknowledgement must include the matching verified artifact digest", 409);
+                command.verifiedArtifactDigest = verified;
+                command.status = "STALE_SUCCEEDED";
+            } else {
+                command.status = "STALE_FAILED";
+            }
+            command.completedAt = now;
+            command.leaseUntil = null;
+            command.resultMessage = bounded(message, 1000);
+            audit.append(command.organizationId, command.environmentId, "runtime:" + runtime.id(),
+                    "DEPLOYMENT_COMMAND_COMPLETED_AFTER_SUPERSESSION", "MANAGEMENT_COMMAND",
+                    command.id.toString(), now, "WARNING");
+            return new AckView(command.id, command.status, true, command.completedAt, command.verifiedArtifactDigest);
+        }
         if (!command.expiresAt.isAfter(now)) {
             expire(command, now, "Command expired before acknowledgement");
             return new AckView(command.id, command.status, false, command.completedAt, command.verifiedArtifactDigest);
@@ -151,35 +202,127 @@ public class RuntimeCommandService {
             command.resultMessage = bounded(message, 1000);
             return new AckView(command.id, command.status, true, null, command.verifiedArtifactDigest);
         }
-
+        if ("SUPERSEDED".equals(status))
+            throw new WebApplicationException("Command has no outstanding supersession request", 409);
         if (!"LEASED".equals(command.status) && !"RUNNING".equals(command.status))
             throw new WebApplicationException("Command must be leased before completion", 409);
+
         if ("SUCCEEDED".equals(status)) {
             DeploymentEntity target = DeploymentEntity.findById(command.deploymentId, LockModeType.PESSIMISTIC_WRITE);
             String verified = verifiedArtifactDigest == null ? "" : verifiedArtifactDigest.trim().toLowerCase();
             if (target == null || !verified.matches("sha256:[0-9a-f]{64}")
-                    || !target.artifactDigest.equalsIgnoreCase(verified)) {
+                    || !target.artifactDigest.equalsIgnoreCase(verified))
                 throw new WebApplicationException("Successful deployment acknowledgement must include the matching verified artifact digest", 409);
-            }
             command.verifiedArtifactDigest = verified;
         }
-        command.status = status;
+        boolean currentGeneration = reconciliation == null || reconciliation.generation == command.generation;
+        command.status = currentGeneration ? status : ("SUCCEEDED".equals(status) ? "STALE_SUCCEEDED" : "STALE_FAILED");
         command.completedAt = now;
         command.leaseUntil = null;
         command.resultMessage = bounded(message, 1000);
-        DeploymentEntity deployment = DeploymentEntity.findById(command.deploymentId, LockModeType.PESSIMISTIC_WRITE);
-        if (deployment != null && "DEPLOYING".equals(deployment.status)) {
-            deployment.status = "SUCCEEDED".equals(status) ? "DEPLOYED" : "FAILED";
-            deployment.updatedAt = now;
-            deployment.completedAt = now;
-            if ("FAILED".equals(status)) deployment.failureReason = bounded(message, 1000);
+        if (currentGeneration) {
+            DeploymentEntity deployment = DeploymentEntity.findById(command.deploymentId, LockModeType.PESSIMISTIC_WRITE);
+            if (deployment != null && "DEPLOYING".equals(deployment.status)) {
+                deployment.status = "SUCCEEDED".equals(status) ? "DEPLOYED" : "FAILED";
+                deployment.updatedAt = now;
+                deployment.completedAt = now;
+                if ("FAILED".equals(status)) deployment.failureReason = bounded(message, 1000);
+            }
         }
         audit.append(command.organizationId, command.environmentId, "runtime:" + runtime.id(),
-                "DEPLOYMENT_COMMAND_" + status, "MANAGEMENT_COMMAND", command.id.toString(), now,
-                "FAILED".equals(status) ? "FAILURE" : "SUCCESS");
+                currentGeneration ? "DEPLOYMENT_COMMAND_" + status : "DEPLOYMENT_COMMAND_COMPLETED_STALE_GENERATION",
+                "MANAGEMENT_COMMAND", command.id.toString(), now,
+                "FAILED".equals(status) ? "FAILURE" : currentGeneration ? "SUCCESS" : "WARNING");
         return new AckView(command.id, command.status, true, command.completedAt, command.verifiedArtifactDigest);
     }
 
+    private static boolean isTerminal(String status) {
+        return Set.of("SUCCEEDED", "FAILED", "EXPIRED", "SUPERSEDED", "STALE_SUCCEEDED",
+                "STALE_FAILED", "SUPERSESSION_UNCONFIRMED").contains(status);
+    }
+
+    @Transactional
+    public DeploymentCommandPage listDeploymentCommands(UUID organizationId, Set<UUID> environments,
+            UUID deploymentId, int page, int size) {
+        if (page < 0 || size < 1 || size > 100)
+            throw new IllegalArgumentException("page must be >= 0 and size must be 1..100");
+        DeploymentEntity deployment = scopedDeployment(organizationId, environments, deploymentId, false);
+        String filter = "deploymentId = ?1 and organizationId = ?2 and environmentId = ?3";
+        long total = ManagementCommandEntity.count(filter, deploymentId, organizationId, deployment.environmentId);
+        List<DeploymentCommandView> items = ManagementCommandEntity.<ManagementCommandEntity>find(
+                filter + " order by createdAt desc, id asc", deploymentId, organizationId, deployment.environmentId)
+                .page(Page.of(page, size)).list().stream().map(command -> new DeploymentCommandView(
+                        command.id, command.generation, command.supersededByGeneration, command.commandType,
+                        command.status, command.createdAt, command.lastDeliveredAt, command.acknowledgedAt,
+                        command.completedAt, command.supersededAt, command.expiresAt, command.attemptCount,
+                        command.resultMessage)).toList();
+        return new DeploymentCommandPage(items, total, page, size);
+    }
+
+    @Transactional
+    public DeploymentCommandView resolveUnconfirmedSupersession(UUID organizationId, Set<UUID> environments,
+            UUID deploymentId, UUID commandId, String actor, String reason) {
+        String rationale = required(reason, "reason");
+        if (rationale.length() > 500)
+            throw new IllegalArgumentException("reason must be 500 characters or fewer");
+        DeploymentEntity deployment = scopedDeployment(organizationId, environments, deploymentId, true);
+        DeploymentReconciliationEntity reconciliation = DeploymentReconciliationEntity
+                .<DeploymentReconciliationEntity>find("deploymentId", deploymentId)
+                .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
+        ManagementCommandEntity command = ManagementCommandEntity.findById(commandId, LockModeType.PESSIMISTIC_WRITE);
+        if (command == null || !deployment.id.equals(command.deploymentId))
+            throw new NotFoundException("Command not found");
+        if (!"SUPERSESSION_UNCONFIRMED".equals(command.status)
+                || reconciliation == null
+                || !java.util.Objects.equals(command.supersededByGeneration, reconciliation.generation))
+            throw new WebApplicationException("Command is not an unresolved supersession for the current generation", 409);
+        Instant now = Instant.now();
+        command.status = "SUPERSEDED";
+        command.completedAt = now;
+        command.leaseUntil = null;
+        command.resultMessage = "Operator verified superseded command is no longer executing: " + bounded(rationale, 500);
+        audit.append(deployment.organizationId, deployment.environmentId, actor,
+                "DEPLOYMENT_COMMAND_SUPERSESSION_OPERATOR_RESOLVED", "MANAGEMENT_COMMAND",
+                command.id.toString(), now, "SUCCESS");
+        return new DeploymentCommandView(command.id, command.generation, command.supersededByGeneration,
+                command.commandType, command.status, command.createdAt, command.lastDeliveredAt,
+                command.acknowledgedAt, command.completedAt, command.supersededAt, command.expiresAt,
+                command.attemptCount, command.resultMessage);
+    }
+
+    @Scheduled(every = "30s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    @Transactional
+    void finalizeUnconfirmedSupersessions() {
+        Instant now = Instant.now();
+        List<UUID> candidateIds = ManagementCommandEntity.<ManagementCommandEntity>find(
+                "status = 'SUPERSESSION_REQUESTED' and (leaseUntil is null or leaseUntil <= ?1 or expiresAt <= ?1) order by supersededAt",
+                now).range(0, 199).list().stream().map(command -> command.id).toList();
+        for (UUID commandId : candidateIds) {
+            ManagementCommandEntity snapshot = ManagementCommandEntity.findById(commandId);
+            if (snapshot == null) continue;
+            DeploymentEntity.findById(snapshot.deploymentId, LockModeType.PESSIMISTIC_WRITE);
+            DeploymentReconciliationEntity reconciliation = DeploymentReconciliationEntity
+                    .<DeploymentReconciliationEntity>find("deploymentId", snapshot.deploymentId)
+                    .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
+            ManagementCommandEntity command = ManagementCommandEntity.findById(commandId, LockModeType.PESSIMISTIC_WRITE);
+            if (command == null || !"SUPERSESSION_REQUESTED".equals(command.status)
+                    || (command.leaseUntil != null && command.leaseUntil.isAfter(now)
+                            && command.expiresAt.isAfter(now))) continue;
+            command.status = "SUPERSESSION_UNCONFIRMED";
+            command.completedAt = now;
+            command.leaseUntil = null;
+            command.resultMessage = "Runtime did not confirm supersession before its lease expired; manual verification is required";
+            if (reconciliation != null && reconciliation.generation == command.supersededByGeneration) {
+                reconciliation.reconciliationState = "MANUAL_INTERVENTION";
+                reconciliation.nextAttemptAt = null;
+                reconciliation.diagnostic = bounded(command.resultMessage, 1000);
+                reconciliation.updatedAt = now;
+            }
+            audit.append(command.organizationId, command.environmentId, "console:command-dispatcher",
+                    "DEPLOYMENT_COMMAND_SUPERSESSION_UNCONFIRMED", "MANAGEMENT_COMMAND",
+                    command.id.toString(), now, "WARNING");
+        }
+    }
 
     @Transactional
     public boolean dispatchDueRetry(UUID deploymentId, Instant now) {
@@ -197,7 +340,7 @@ public class RuntimeCommandService {
             return false;
         }
         List<ManagementCommandEntity> active = ManagementCommandEntity.list(
-                "deploymentId = ?1 and status in ('PENDING','LEASED','RUNNING')", deploymentId);
+                "deploymentId = ?1 and status in ('PENDING','LEASED','RUNNING','SUPERSESSION_REQUESTED','SUPERSESSION_UNCONFIRMED')", deploymentId);
         if (!active.isEmpty()) {
             reconciliation.nextAttemptAt = now.plusSeconds(30);
             reconciliation.diagnostic = "Retry deferred while an earlier command remains active";
@@ -231,6 +374,7 @@ public class RuntimeCommandService {
         command.organizationId = deployment.organizationId;
         command.environmentId = deployment.environmentId;
         command.deploymentId = deployment.id;
+        command.generation = reconciliation.generation;
         command.idempotencyKey = idempotencyKey;
         command.commandType = "APPLY_DEPLOYMENT";
         command.typedPayload = payload(deployment, reconciliation.generation, reconciliation.retryCount);

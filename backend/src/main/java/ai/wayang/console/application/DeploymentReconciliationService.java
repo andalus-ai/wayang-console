@@ -2,6 +2,7 @@ package ai.wayang.console.application;
 
 import ai.wayang.console.adapter.persistence.DeploymentEntity;
 import ai.wayang.console.adapter.persistence.AuditRecordEntity;
+import ai.wayang.console.adapter.persistence.ManagementCommandEntity;
 import ai.wayang.console.adapter.persistence.DeploymentReconciliationEntity;
 import ai.wayang.console.adapter.persistence.RuntimeInstanceEntity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -53,8 +54,17 @@ public class DeploymentReconciliationService {
             row = new DeploymentReconciliationEntity();
             row.id = UUID.randomUUID(); row.deploymentId = deploymentId;
             row.generation = 1; row.observedState = "UNKNOWN"; row.reportSequence = 0;
+            long undeliveredOrActive = ManagementCommandEntity.count(
+                    "deploymentId = ?1 and generation = 1 and status in ('PENDING','LEASED','RUNNING')",
+                    deployment.id);
+            if (!"PRESENT".equals(desired) && undeliveredOrActive > 0) {
+                row.generation = 2;
+                supersedeOlderCommands(deployment, 1L, 2L, now, actor);
+            }
         } else if (!row.desiredState.equals(desired)) {
+            long previousGeneration = row.generation;
             row.generation++;
+            supersedeOlderCommands(deployment, previousGeneration, row.generation, now, actor);
             row.retryCount = 0;
             row.nextAttemptAt = null;
             row.lastAttemptAt = null;
@@ -218,6 +228,35 @@ public class DeploymentReconciliationService {
             throw new IllegalArgumentException("page must be >= 0 and size must be 1..100");
     }
 
+    /**
+     * Commands that have not left the queue can be safely closed. A command already
+     * leased or running receives a cooperative supersession request and remains visible
+     * until the runtime acknowledges or its lease expires.
+     */
+    private void supersedeOlderCommands(DeploymentEntity deployment, long oldGeneration,
+            long newGeneration, Instant now, String actor) {
+        List<ManagementCommandEntity> stale = ManagementCommandEntity.<ManagementCommandEntity>find(
+                "deploymentId = ?1 and generation <= ?2 and status in ('PENDING','LEASED','RUNNING')",
+                deployment.id, oldGeneration).withLock(LockModeType.PESSIMISTIC_WRITE).list();
+        for (ManagementCommandEntity command : stale) {
+            command.supersededByGeneration = newGeneration;
+            command.supersededAt = now;
+            if ("PENDING".equals(command.status)) {
+                command.status = "SUPERSEDED";
+                command.completedAt = now;
+                command.resultMessage = "Superseded before delivery by desired generation " + newGeneration;
+                audit.append(deployment.organizationId, deployment.environmentId, actor,
+                        "DEPLOYMENT_COMMAND_SUPERSEDED", "MANAGEMENT_COMMAND", command.id.toString(), now, "SUCCESS");
+            } else {
+                command.status = "SUPERSESSION_REQUESTED";
+                command.resultMessage = "Runtime must stop or report completion; superseded by desired generation " + newGeneration;
+                audit.append(deployment.organizationId, deployment.environmentId, actor,
+                        "DEPLOYMENT_COMMAND_SUPERSESSION_REQUESTED", "MANAGEMENT_COMMAND",
+                        command.id.toString(), now, "WARNING");
+            }
+        }
+    }
+
     /** Operator-authorized retry after a runtime failure or exhausted automatic recovery. */
     @Transactional
     public ReconciliationView requestOperatorRetry(UUID organizationId, Set<UUID> environments,
@@ -236,6 +275,11 @@ public class DeploymentReconciliationService {
             throw new WebApplicationException("Operator retry requires a FAILED observation or manual-intervention state", 409);
         if (deployment.runtimeId == null)
             throw new WebApplicationException("Deployment has no target runtime", 409);
+        long unresolvedSupersessions = ManagementCommandEntity.count(
+                "deploymentId = ?1 and status in ('SUPERSESSION_REQUESTED','SUPERSESSION_UNCONFIRMED')",
+                deploymentId);
+        if (unresolvedSupersessions > 0)
+            throw new WebApplicationException("An older command has unconfirmed supersession; resolve it before retrying", 409);
         Instant now = Instant.now();
         Instant cooldownBoundary = now.minusSeconds(30);
         AuditRecordEntity previousRetry = AuditRecordEntity.<AuditRecordEntity>find(

@@ -1,6 +1,7 @@
 package ai.wayang.console.api;
 
 import ai.wayang.console.application.DeploymentReconciliationService;
+import ai.wayang.console.application.RuntimeCommandService;
 import ai.wayang.console.security.ConsoleOperatorContext;
 import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
@@ -17,6 +18,7 @@ import jakarta.ws.rs.QueryParam;
 public class DeploymentReconciliationResource {
     @Inject ConsoleOperatorContext operator;
     @Inject DeploymentReconciliationService reconciliation;
+    @Inject RuntimeCommandService commands;
 
     public record DesiredStateRequest(String desiredState) {}
 
@@ -60,6 +62,31 @@ public class DeploymentReconciliationResource {
             @QueryParam("size") @DefaultValue("25") int size) {
         operator.requireRead();
         return reconciliation.auditTimeline(operator.organizationId(), operator.environmentIds(),
+                deploymentId, page, size);
+    }
+
+    public record SupersessionResolutionRequest(String reason) {}
+
+    @POST
+    @Path("/{deploymentId}/commands/{commandId}/resolve-supersession")
+    public RuntimeCommandService.DeploymentCommandView resolveSupersession(
+            @PathParam("deploymentId") UUID deploymentId,
+            @PathParam("commandId") UUID commandId,
+            SupersessionResolutionRequest request) {
+        operator.requireAdmin();
+        if (request == null) throw new BadRequestException("Request body is required");
+        return commands.resolveUnconfirmedSupersession(operator.organizationId(), operator.environmentIds(),
+                deploymentId, commandId, operator.subject(), request.reason());
+    }
+
+    @GET
+    @Path("/{deploymentId}/commands")
+    public RuntimeCommandService.DeploymentCommandPage commandHistory(
+            @PathParam("deploymentId") UUID deploymentId,
+            @QueryParam("page") @DefaultValue("0") int page,
+            @QueryParam("size") @DefaultValue("25") int size) {
+        operator.requireRead();
+        return commands.listDeploymentCommands(operator.organizationId(), operator.environmentIds(),
                 deploymentId, page, size);
     }
 
