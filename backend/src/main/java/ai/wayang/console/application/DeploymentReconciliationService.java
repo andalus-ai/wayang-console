@@ -133,6 +133,7 @@ public class DeploymentReconciliationService {
 
     @Transactional
     public int scheduleTimedOutRetries(Instant now) {
+        now = now.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         Instant deadline = now.minus(OBSERVATION_TIMEOUT);
         List<DeploymentReconciliationEntity> timedOut = DeploymentReconciliationEntity
                 .<DeploymentReconciliationEntity>find(
