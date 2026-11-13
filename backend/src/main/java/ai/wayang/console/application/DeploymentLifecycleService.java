@@ -59,7 +59,7 @@ public class DeploymentLifecycleService {
         if (requireRegisteredArtifact) artifacts.assertRegistered(organizationId, runtime.environmentId, artifactDigest, manifestDigest);
         String minimumRuntime = minimumRuntimeVersion == null || minimumRuntimeVersion.isBlank()
                 ? null : requiredBounded(minimumRuntimeVersion, 80, "minimumRuntimeVersion");
-        if (minimumRuntime != null && !minimumRuntime.matches("(?i)v?[0-9]+(?:\\\\.[0-9]+)*"))
+        if (minimumRuntime != null && !minimumRuntime.matches("(?i)v?[0-9]+(?:\\.[0-9]+)*"))
             throw new IllegalArgumentException("minimumRuntimeVersion must be a numeric dotted version");
         List<CapabilityRequirement> safeRequirements = requirements == null ? List.of() : new java.util.ArrayList<>(requirements);
         if (safeRequirements.size() > 100) throw new IllegalArgumentException("At most 100 runtime capability requirements are allowed");
