@@ -20,7 +20,9 @@ public class PostgresTestResource implements QuarkusTestResourceLifecycleManager
                 "quarkus.datasource.password", postgres.getPassword(),
                 "quarkus.liquibase.migrate-at-start", "true",
                 // Non-empty sentinel satisfies required config injection; tests register managed publisher keys.
-                "wayang.console.artifacts.signing-key-id", "test-only-unmanaged-key"
+                "wayang.console.artifacts.signing-key-id", "test-only-unmanaged-key",
+                // Valid DER-encoded Ed25519 test key; managed publisher keys are registered per test.
+                "wayang.console.artifacts.ed25519-public-key", "MCowBQYDK2VwAyEAAQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="
         );
     }
 
