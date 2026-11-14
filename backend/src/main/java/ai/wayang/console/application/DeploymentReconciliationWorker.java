@@ -17,6 +17,7 @@ public class DeploymentReconciliationWorker {
     @Scheduled(every = "30s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void recoverTimedOutDeployments() {
         Instant now = Instant.now();
+        reconciliation.reconcileExpiredObservations(now);
         reconciliation.scheduleTimedOutRetries(now);
         for (var deploymentId : reconciliation.dueRetryDeploymentIds(now)) {
             commands.dispatchDueRetry(deploymentId, now);
