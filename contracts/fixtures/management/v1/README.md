@@ -2,7 +2,7 @@
 
 These are synthetic protobuf TextFormat characterization inputs aligned to the current schema at contracts/proto/wayang/management/v1/management.proto.
 
-They are not serialized protobuf wire bytes and do not, by themselves, prove binary compatibility. Their purpose in this first M7 slice is to make intended field-level examples reviewable and stable while the Core contract module and actual runtime consumer are established.
+They are not serialized protobuf wire bytes and do not, by themselves, prove compatibility with a separately deployed runtime. Their role is to make field-level examples reviewable and feed the executable parser/serialization checks in ManagementContractCompatibilityTest.
 
 ## Coverage
 
@@ -18,17 +18,18 @@ They are not serialized protobuf wire bytes and do not, by themselves, prove bin
 
 - Values are deterministic examples, not credentials or production identifiers.
 - Timestamps use explicit UTC seconds/nanos.
+- The PollCommands response's typed_payload is a protobuf bytes field represented by a TextFormat string literal.
 - Do not renumber fields, change field wire types, or reuse removed field numbers in the current schema.
-- Additive fields must be tested for old-reader behavior once generated descriptors and a runnable compatibility test harness are available.
+- Additive fields must be tested for old-reader behavior using generated descriptors.
 - Keep fixtures independent of Console database entities and REST response DTOs.
 
-## Promotion to executable golden tests
+## Executable checks in this slice
 
-The next test-harness slice must:
-1. Compile the schema with the exact protobuf toolchain used by both consumers.
-2. Parse each TextFormat fixture into its generated message.
-3. Serialize to binary and compare against checked-in binary goldens (or a stable SHA-256 manifest).
-4. Parse old goldens with the new descriptor and verify unknown additive fields are preserved by the protobuf runtime where applicable.
-5. Exercise actual runtime and Console adapters, not only generated message classes.
+The backend pins protoc and the Java protobuf runtime to the same version, compiles the schemas from contracts/proto, and runs a focused compatibility test that:
+1. Parses all ten fixtures into generated message builders.
+2. Serializes each parsed message to protobuf binary and verifies a DynamicMessage parse/serialize round-trip.
+3. Asserts the five RuntimeManagement RPC method names.
+4. Asserts ManagementCommand field numbers and protobuf types.
+5. Appends an unknown field to a message and verifies an older descriptor preserves it through parse/serialize.
 
-Do not describe this directory as wire-compatibility proof until those tests run in CI.
+The round-trip checks are executable serialization checks, not fixed historical binary goldens. A future slice should check in immutable binary goldens and test cross-version descriptors plus the actual Wayang runtime and Console adapters.
