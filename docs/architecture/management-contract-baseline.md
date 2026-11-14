@@ -94,9 +94,9 @@ Field numbers and wire types remain defined exclusively by the .proto source. Th
 
 ### Consequence for M7
 
-The current system has a functioning REST/JSON management surface and a separate, currently unconsumed protobuf/gRPC contract. The next design decision is whether to (a) make protobuf/gRPC the canonical cross-process contract and adapt the existing Console services without changing their ownership, or (b) promote the REST/JSON contract to canonical status and treat protobuf as an optional transport. The decision must account for the current REST-only registration-token issuance and bearer-token authentication model; simply generating gRPC stubs will not make the protocols equivalent.
+The current system has a functioning REST/JSON management surface and a separate, currently unconsumed protobuf/gRPC contract. The accepted M7 decision is to keep REST/JSON as the canonical implemented transport and retain protobuf as a separately versioned schema/compatibility artifact. This is a sequencing decision, not a permanent rejection of gRPC. The exact rationale, field-level reconciliation, security constraints and migration gates are recorded in [Management Transport Decision](management-transport-decision.md).
 
-Whichever transport is selected, define authentication and tenant binding, registration credential issuance/rotation, lease semantics, idempotency, command payload versioning, retry/backoff, and protocol negotiation consistently across both sides.
+Do not extract the management schema to Core or claim cross-process interoperability until a real runtime client and Console adapter implement the selected contract and pass end-to-end conformance tests.
 
 ## Ownership constraints
 
