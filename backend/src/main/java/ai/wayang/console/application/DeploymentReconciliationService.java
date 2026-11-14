@@ -43,6 +43,9 @@ public class DeploymentReconciliationService {
             long waitingRuntime, long retrying, long manualIntervention, long other,
             long dueRetries, long unresolvedSupersessions, OldestUnresolved oldestUnresolved,
             Instant generatedAt) {}
+    public record ReconciliationHealth(String status, long unresolved, long fresh,
+            long warning, long critical, long warningThresholdSeconds,
+            long criticalThresholdSeconds, OldestUnresolved oldestUnresolved, Instant generatedAt) {}
     public record AuditEventView(long sequence, Instant occurredAt, String actor, String action,
             String outcome, String recordHash) {}
     public record AuditTimelinePage(List<AuditEventView> items, long total, int page, int size) {}
@@ -289,6 +292,49 @@ public class DeploymentReconciliationService {
         }
         return new ReconciliationFleetSummary(total, inSync, drifted, waiting, retrying, manual,
                 other, due, unresolved, oldestView, now);
+    }
+
+    /**
+     * Read-only age-based recovery SLA view. Age is measured from the last state update,
+     * not from a runtime-supplied clock. Thresholds are intentionally explicit defaults:
+     * five minutes to warning and fifteen minutes to critical.
+     */
+    @Transactional
+    public ReconciliationHealth reconciliationHealth(UUID organizationId, Set<UUID> environments, Instant now) {
+        final long warningSeconds = 300;
+        final long criticalSeconds = 900;
+        if (environments == null || environments.isEmpty())
+            return new ReconciliationHealth("HEALTHY", 0, 0, 0, 0,
+                    warningSeconds, criticalSeconds, null, now);
+
+        String scope = "deploymentId in (select d.id from DeploymentEntity d "
+                + "where d.organizationId = ?1 and d.environmentId in ?2)"
+                + " and reconciliationState <> 'IN_SYNC'";
+        long unresolved = DeploymentReconciliationEntity.count(scope, organizationId, environments);
+        Instant warningCutoff = now.minusSeconds(warningSeconds);
+        Instant criticalCutoff = now.minusSeconds(criticalSeconds);
+        long critical = DeploymentReconciliationEntity.count(scope + " and updatedAt <= ?3",
+                organizationId, environments, criticalCutoff);
+        long warning = DeploymentReconciliationEntity.count(scope
+                        + " and updatedAt <= ?3 and updatedAt > ?4",
+                organizationId, environments, warningCutoff, criticalCutoff);
+        long fresh = Math.max(0, unresolved - warning - critical);
+        DeploymentReconciliationEntity oldest = DeploymentReconciliationEntity
+                .<DeploymentReconciliationEntity>find(scope
+                        + " order by updatedAt asc, deploymentId asc", organizationId, environments)
+                .firstResult();
+        OldestUnresolved oldestView = null;
+        if (oldest != null) {
+            DeploymentEntity deployment = DeploymentEntity.findById(oldest.deploymentId);
+            if (deployment != null) {
+                long age = Math.max(0, Duration.between(oldest.updatedAt, now).getSeconds());
+                oldestView = new OldestUnresolved(oldest.deploymentId, deployment.deploymentId,
+                        deployment.environmentId, oldest.reconciliationState, oldest.updatedAt, age);
+            }
+        }
+        String status = critical > 0 ? "CRITICAL" : warning > 0 ? "WARNING" : "HEALTHY";
+        return new ReconciliationHealth(status, unresolved, fresh, warning, critical,
+                warningSeconds, criticalSeconds, oldestView, now);
     }
 
     private static long countState(String scope, UUID organizationId, Set<UUID> environments, String state) {

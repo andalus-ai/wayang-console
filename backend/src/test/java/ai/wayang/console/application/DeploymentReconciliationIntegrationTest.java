@@ -259,6 +259,56 @@ class DeploymentReconciliationIntegrationTest {
 
     @Test
     @TestTransaction
+    void reconciliationHealthClassifiesAgeBandsWithinAuthenticatedScope() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID(), outsideEnv = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "sla-health-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "8".repeat(64);
+        var fresh = deployments.create(org, Set.of(env), runtime.id(), "sla-fresh-" + UUID.randomUUID(),
+                "fresh.flow", "1.0.0", digest, digest, "test-operator");
+        var warning = deployments.create(org, Set.of(env), runtime.id(), "sla-warning-" + UUID.randomUUID(),
+                "warning.flow", "1.0.0", digest, digest, "test-operator");
+        var critical = deployments.create(org, Set.of(env), runtime.id(), "sla-critical-" + UUID.randomUUID(),
+                "critical.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), fresh.id(), "PRESENT", "test-operator");
+        reconciliation.setDesired(org, Set.of(env), warning.id(), "PRESENT", "test-operator");
+        reconciliation.setDesired(org, Set.of(env), critical.id(), "PRESENT", "test-operator");
+
+        Instant now = Instant.now();
+        DeploymentReconciliationEntity freshRow = DeploymentReconciliationEntity.find("deploymentId", fresh.id()).firstResult();
+        freshRow.updatedAt = now.minusSeconds(120);
+        freshRow.persist();
+        DeploymentReconciliationEntity warningRow = DeploymentReconciliationEntity.find("deploymentId", warning.id()).firstResult();
+        warningRow.updatedAt = now.minusSeconds(600);
+        warningRow.persist();
+        DeploymentReconciliationEntity criticalRow = DeploymentReconciliationEntity.find("deploymentId", critical.id()).firstResult();
+        criticalRow.updatedAt = now.minusSeconds(1200);
+        criticalRow.persist();
+
+        var outsideEnrollment = registry.issueEnrollmentToken(org, outsideEnv, Duration.ofHours(1));
+        var outsideRegistration = registry.enroll(outsideEnrollment.token(), "sla-outside-" + UUID.randomUUID(),
+                "1.2.0", null, null, null);
+        var outsideRuntime = registry.authenticate(outsideRegistration.registrationToken());
+        var outside = deployments.create(org, Set.of(outsideEnv), outsideRuntime.id(), "sla-outside-" + UUID.randomUUID(),
+                "outside.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(outsideEnv), outside.id(), "PRESENT", "test-operator");
+
+        var health = reconciliation.reconciliationHealth(org, Set.of(env), now);
+        assertEquals("CRITICAL", health.status());
+        assertEquals(3L, health.unresolved());
+        assertEquals(1L, health.fresh());
+        assertEquals(1L, health.warning());
+        assertEquals(1L, health.critical());
+        assertEquals(300L, health.warningThresholdSeconds());
+        assertEquals(900L, health.criticalThresholdSeconds());
+        assertEquals(critical.id(), health.oldestUnresolved().deploymentId());
+        assertEquals(0L, reconciliation.reconciliationHealth(UUID.randomUUID(), Set.of(env), now).unresolved());
+        assertEquals("HEALTHY", reconciliation.reconciliationHealth(org, Set.of(), now).status());
+    }
+
+    @Test
+    @TestTransaction
     void operatorRetryHourlyLimitIsDurableAndReturnsTooManyRequests() {
         UUID org = UUID.randomUUID(), env = UUID.randomUUID();
         var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));

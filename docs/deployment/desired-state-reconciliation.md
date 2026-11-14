@@ -173,3 +173,22 @@ The observation read model exposes a derived observationFresh flag based on the 
 The worker processes a bounded batch and locks each deployment before its reconciliation row. It changes state only after rechecking the desired state, current reconciliation state, and receipt timestamp under lock. Repeated worker runs therefore do not emit duplicate expiry events or repeatedly reset the retry schedule. The existing timeout/backoff worker subsequently handles WAITING_RUNTIME; no second command queue or outbox is introduced.
 
 This milestone is observational and non-destructive. It does not stop workloads for ABSENT, auto-apply rollback, or infer that an unreachable runtime has terminated. Existing generation fencing, command supersession, bounded retries, and operator escalation remain authoritative.
+
+
+## M1.10.8 — fleet reconciliation summary
+
+The operator-facing fleet summary is available at:
+
+`GET /api/v1/console/deployments/reconciliation/summary`
+
+It aggregates reconciliation states, due retries, unresolved command supersessions, and the oldest unresolved deployment for the authenticated organization/environment scope. It is read-only and does not dispatch commands or mutate deployment state. The existing paginated queue remains the drill-down surface.
+
+## M1.10.9 — age-based reconciliation health
+
+The Console exposes an age-based operational health view at:
+
+`GET /api/v1/console/deployments/reconciliation/health`
+
+The endpoint classifies unresolved reconciliation records by time since their last state update: fresh (under five minutes), warning (five to under fifteen minutes), and critical (fifteen minutes or more). The response includes the explicit thresholds, counts for each band, an overall HEALTHY/WARNING/CRITICAL status, and the oldest unresolved deployment. Counts and details are restricted to the authenticated operator's organization/environment scope; empty scope returns a healthy zero-count response.
+
+This is a derived, read-only signal. It does not mutate reconciliation state, create another queue, dispatch retries, or claim that a runtime process has stopped. Age is based on the Console's persisted `updatedAt`, not a runtime-provided timestamp. Thresholds are fixed defaults in this milestone and can be made configurable through deployment policy in a later change.
