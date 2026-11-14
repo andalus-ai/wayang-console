@@ -2,7 +2,7 @@
 
 These are synthetic protobuf TextFormat characterization inputs aligned to the current schema at contracts/proto/wayang/management/v1/management.proto.
 
-They are not serialized protobuf wire bytes and do not, by themselves, prove compatibility with a separately deployed runtime. Their role is to make field-level examples reviewable and feed the executable parser/serialization checks in ManagementContractCompatibilityTest.
+The sibling `golden/` directory contains immutable hexadecimal encodings of the ten messages. The executable Java test parses each TextFormat fixture with classes generated from the checked-in .proto, serializes it, and compares the exact bytes to the checked-in golden. The golden byte sequences were independently encoded from the schema using the Python protobuf wire implementation; CI verifies that the pinned Java protoc/runtime toolchain produces identical bytes. These fixtures characterize serialization compatibility, but do not prove a separately deployed runtime is connected to Console.
 
 ## Coverage
 
@@ -32,4 +32,4 @@ The backend pins protoc and the Java protobuf runtime to the same version, compi
 4. Asserts ManagementCommand field numbers and protobuf types.
 5. Appends an unknown field to a message and verifies an older descriptor preserves it through parse/serialize.
 
-The round-trip checks are executable serialization checks, not fixed historical binary goldens. A future slice should check in immutable binary goldens and test cross-version descriptors plus the actual Wayang runtime and Console adapters.
+The test now compares every generated message's serialized bytes against an immutable `golden/*.bin.hex` file. Changing a golden requires an intentional review of the wire-level diff and a corresponding schema compatibility decision. The old/new descriptor forwarding test covers additive unknown-field preservation. Actual Wayang runtime and Console transport interoperability remains a separate gate.
