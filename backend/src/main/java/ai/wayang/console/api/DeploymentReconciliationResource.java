@@ -7,6 +7,7 @@ import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.util.UUID;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.QueryParam;
@@ -75,7 +76,7 @@ public class DeploymentReconciliationResource {
     @GET
     @Path("/reconciliation/sla/metrics/prometheus")
     @Produces("text/plain; version=0.0.4; charset=utf-8")
-    public String reconciliationSlaPrometheusMetrics() {
+    public Response reconciliationSlaPrometheusMetrics() {
         operator.requireRead();
         var metrics = reconciliation.reconciliationSlaMetrics(operator.organizationId(),
                 operator.environmentIds(), java.time.Instant.now());
@@ -104,7 +105,9 @@ public class DeploymentReconciliationResource {
                 .append("# TYPE wayang_console_reconciliation_sla_policy_info gauge\n")
                 .append("wayang_console_reconciliation_sla_policy_info{version=\"")
                 .append(metrics.policyVersion()).append("\"} 1\n");
-        return out.toString();
+        return Response.ok(out.toString(), "text/plain; version=0.0.4; charset=utf-8")
+                .header("Cache-Control", "no-store")
+                .build();
     }
 
     private static void appendGauge(StringBuilder out, String name, String help, long value) {
