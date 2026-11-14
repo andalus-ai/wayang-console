@@ -61,6 +61,15 @@ public class DeploymentReconciliationResource {
     }
 
     @GET
+    @Path("/reconciliation/sla/history")
+    public DeploymentReconciliationService.SlaTransitionPage reconciliationSlaHistory(
+            @QueryParam("page") @DefaultValue("0") int page,
+            @QueryParam("size") @DefaultValue("25") int size) {
+        operator.requireRead();
+        return reconciliation.slaHistory(operator.organizationId(), operator.environmentIds(), page, size);
+    }
+
+    @GET
     @Path("/reconciliation")
     public DeploymentReconciliationService.ReconciliationQueuePage queue(
             @QueryParam("state") String state,
