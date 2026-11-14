@@ -64,8 +64,8 @@ class ManagementContractCompatibilityTest {
             var goldenStream = getClass().getClassLoader().getResourceAsStream(fixture.goldenResource());
             assertNotNull(goldenStream, () -> "Missing immutable wire golden: " + fixture.goldenResource());
             String goldenHex;
-            try (var goldenReader = new InputStreamReader(goldenStream, StandardCharsets.US_ASCII)) {
-                goldenHex = goldenReader.lines().reduce("", String::concat).trim();
+            try (goldenStream) {
+                goldenHex = new String(goldenStream.readAllBytes(), StandardCharsets.US_ASCII).trim();
             }
             byte[] golden = HexFormat.of().parseHex(goldenHex);
             assertArrayEquals(golden, encoded,
