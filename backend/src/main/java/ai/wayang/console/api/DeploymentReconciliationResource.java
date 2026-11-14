@@ -61,6 +61,59 @@ public class DeploymentReconciliationResource {
     }
 
     @GET
+    @Path("/reconciliation/sla/metrics")
+    public DeploymentReconciliationService.ReconciliationSlaMetrics reconciliationSlaMetrics() {
+        operator.requireRead();
+        return reconciliation.reconciliationSlaMetrics(operator.organizationId(), operator.environmentIds(),
+                java.time.Instant.now());
+    }
+
+    /**
+     * Prometheus text exposition for the authenticated operator's scope.
+     * No tenant, environment, deployment, runtime, or user identifiers are emitted as labels.
+     */
+    @GET
+    @Path("/reconciliation/sla/metrics/prometheus")
+    @Produces("text/plain; version=0.0.4; charset=utf-8")
+    public String reconciliationSlaPrometheusMetrics() {
+        operator.requireRead();
+        var metrics = reconciliation.reconciliationSlaMetrics(operator.organizationId(),
+                operator.environmentIds(), java.time.Instant.now());
+        StringBuilder out = new StringBuilder(2048);
+        appendGauge(out, "wayang_console_reconciliation_unresolved",
+                "Unresolved deployment reconciliations in the authenticated scope.", metrics.unresolved());
+        appendGauge(out, "wayang_console_reconciliation_fresh",
+                "Unresolved reconciliations below the warning SLA threshold.", metrics.fresh());
+        appendGauge(out, "wayang_console_reconciliation_warning",
+                "Unresolved reconciliations in the warning SLA band.", metrics.warning());
+        appendGauge(out, "wayang_console_reconciliation_critical",
+                "Unresolved reconciliations in the critical SLA band.", metrics.critical());
+        appendGauge(out, "wayang_console_reconciliation_sla_warning_threshold_seconds",
+                "Configured warning threshold in seconds.", metrics.warningThresholdSeconds());
+        appendGauge(out, "wayang_console_reconciliation_sla_critical_threshold_seconds",
+                "Configured critical threshold in seconds.", metrics.criticalThresholdSeconds());
+        out.append("# HELP wayang_console_reconciliation_sla_transitions_total Append-only SLA transition events by destination state.\\n")
+                .append("# TYPE wayang_console_reconciliation_sla_transitions_total counter\\n")
+                .append("wayang_console_reconciliation_sla_transitions_total{to_status=\"HEALTHY\"} ")
+                .append(metrics.transitionsToHealthy()).append('\\n')
+                .append("wayang_console_reconciliation_sla_transitions_total{to_status=\"WARNING\"} ")
+                .append(metrics.transitionsToWarning()).append('\\n')
+                .append("wayang_console_reconciliation_sla_transitions_total{to_status=\"CRITICAL\"} ")
+                .append(metrics.transitionsToCritical()).append('\\n');
+        out.append("# HELP wayang_console_reconciliation_sla_policy_info Active SLA policy version.\\n")
+                .append("# TYPE wayang_console_reconciliation_sla_policy_info gauge\\n")
+                .append("wayang_console_reconciliation_sla_policy_info{version=\"")
+                .append(metrics.policyVersion()).append("\"} 1\\n");
+        return out.toString();
+    }
+
+    private static void appendGauge(StringBuilder out, String name, String help, long value) {
+        out.append("# HELP ").append(name).append(' ').append(help).append('\\n')
+                .append("# TYPE ").append(name).append(" gauge\\n")
+                .append(name).append(' ').append(value).append('\\n');
+    }
+
+    @GET
     @Path("/reconciliation/sla/history")
     public DeploymentReconciliationService.SlaTransitionPage reconciliationSlaHistory(
             @QueryParam("page") @DefaultValue("0") int page,
