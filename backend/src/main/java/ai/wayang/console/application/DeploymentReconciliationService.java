@@ -405,7 +405,7 @@ public class DeploymentReconciliationService {
         validatePage(page, size);
         if (environments == null || environments.isEmpty()) return new SlaTransitionPage(List.of(), 0, page, size);
         String filter = "organizationId = ?1 and environmentId in ?2 and resourceType = 'DEPLOYMENT' and action like ?3";
-        String pattern = "RECONCILIATION\\_SLA\\_%";
+        String pattern = "RECONCILIATION_SLA_%";
         long total = AuditRecordEntity.count(filter, organizationId, environments, pattern);
         List<AuditRecordEntity> records = AuditRecordEntity.<AuditRecordEntity>find(
                 filter + " order by occurredAt desc, sequenceNo desc", organizationId, environments, pattern)
