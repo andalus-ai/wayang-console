@@ -2,7 +2,7 @@
 
 ## Scope and status
 
-This document records the Console repository's current runtime-management contract boundary for M7. It is a characterization baseline, not a declaration that a shared artifact has been published or that a native gRPC transport is deployed.
+This document records the Console repository's current runtime-management contract boundary for M7. It is a characterization baseline, not a declaration that a shared artifact has been published or that a native management gRPC transport is deployed.
 
 Canonical source today:
 contracts/proto/wayang/management/v1/management.proto
@@ -84,26 +84,33 @@ Field numbers and wire types remain defined exclusively by the .proto source. Th
 
 ## Observed consumer boundary
 
-- The Console repository has application-level integration tests for enrollment/registry, inventory replacement, command polling and acknowledgement. These exercise Console services and persistence behavior.
-- The management .proto files are present under contracts/proto.
-- The backend now compiles the protobuf schemas into Java messages and includes the protobuf Java runtime. This does not mean that a native gRPC server/client or deployed transport adapter exists; the Maven setup intentionally does not generate gRPC stubs.
-- The Wayang runtime module inspected for this baseline does not declare a dependency on a shared management-contract artifact. Its repository has other gRPC-related code, but that is not evidence that it consumes this management schema.
-- Wayang Core currently contains the wayang-core-model module only; the management-contract module described in its architecture is a target, not an existing published artifact.
+- Console application-level integration tests cover enrollment/registry, inventory replacement, command polling and acknowledgement. These exercise Console services and persistence behavior.
+- The management .proto files are present under contracts/proto and are compiled into generated Java message classes for contract tests. This does not create a native gRPC server/client.
+- The current Console command transport inspected at `backend/src/main/java/ai/wayang/console/api/RuntimeCommandResource.java` is REST/JSON: `POST /api/v1/runtime/commands/poll` and `POST /api/v1/runtime/commands/{commandId}/ack`. The current HTTP resource is not an adapter for the five protobuf RPCs.
+- Wayang's `wayang-api-rest` module has Quarkus gRPC enabled and `WayangGrpcService` implements the application API for workflow runs, tasks, messages and run watching. Its RPC surface is not the `RuntimeManagement` service defined here. The Wayang gRPC service therefore must not be treated as a management-protocol consumer.
+- The inspected Wayang runtime/API module does not declare a dependency on a shared management-contract artifact. Existing gRPC support is a separate API surface.
+- Wayang Core currently contains the `wayang-core-model` module only. There is no management-contract module or released artifact to consume yet.
+
+### Consequence for M7
+
+The present protobuf schema is a target contract, not an already interoperable cross-repository transport. Before extraction, the project must make an explicit choice between (a) implementing the five RPCs as a real runtime-to-Console gRPC protocol or (b) defining a versioned HTTP/JSON management contract and treating protobuf as a future/alternate transport. Do not silently equate REST resources with protobuf RPCs or introduce a partial adapter that only covers poll/ack.
+
+The first implementation should also define authentication and tenant binding, registration credential issuance/rotation, lease semantics, idempotency, command payload versioning, retry/backoff, and protocol negotiation consistently across both sides.
 
 ## Ownership constraints
 
-- Core will own the portable management protocol source, generated contract artifact and compatibility policy after extraction.
-- Wayang will own the runtime-side management agent and transport adapter.
-- Console will own enrollment, authorization, fleet persistence, command lifecycle, audit and server application services.
+- Core should own only portable management message definitions, generated contract artifact and compatibility policy after extraction.
+- Wayang should own the runtime-side management agent and transport adapter.
+- Console should own enrollment, authorization, fleet persistence, command lifecycle, audit and server application services.
 - Console REST DTOs, JPA entities and repositories remain local unless explicitly promoted to a cross-process contract.
 - The plugin catalog protobuf is a metadata projection; it does not authorize plugin execution or distribution.
 
 ## Required migration gates
 
-1. Freeze current field numbers and wire types; reserve removed fields and never reuse numbers.
-2. Extend the newly added generated-message compilation and executable fixture round-trip checks with immutable historical binary goldens using the pinned protoc/runtime toolchain.
-3. Add unknown-field and additive-field compatibility tests.
-4. Identify and test the actual Wayang runtime management consumer and Console server adapter.
+1. Freeze current field numbers and wire types; reserve removed fields and never reuse field numbers.
+2. Add immutable historical binary goldens for every request/response fixture using the pinned protoc/runtime toolchain.
+3. Keep additive-field compatibility tests that parse new messages with an old descriptor and forward them without losing unknown fields.
+4. Specify the management transport and implement/test the actual Wayang runtime management agent and Console adapter end-to-end.
 5. Create the Core management-contract module and publish a versioned artifact only after the schema and compatibility tests are authoritative there.
 6. Migrate Wayang and Console consumers to the same released artifact/version range.
 7. Remove the Console-local schema only after both consumers pass cross-repository interoperability CI.
@@ -117,4 +124,4 @@ Field numbers and wire types remain defined exclusively by the .proto source. Th
 - Treat changes to command payload semantics as versioned application-contract changes even though the payload is represented as bytes.
 - Keep timestamps in UTC and define lease/expiry semantics independently of wall-clock serialization.
 
-The focused test verifies TextFormat parsing, protobuf binary round-trips, RPC descriptor names, selected field numbers/types and unknown-field preservation. It does not yet compare immutable historical binary goldens or exercise actual runtime/Console transport adapters. See contracts/fixtures/management/v1/README.md.
+The focused test verifies TextFormat parsing, protobuf binary round-trips, RPC descriptor names, selected field numbers/types, unknown-field preservation, and forwarding from a new descriptor through an older descriptor. It does not yet compare immutable historical binary goldens or exercise actual runtime/Console transport adapters. See contracts/fixtures/management/v1/README.md.
