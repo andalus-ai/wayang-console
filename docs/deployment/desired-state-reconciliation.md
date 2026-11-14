@@ -231,3 +231,20 @@ The exposition includes unresolved, fresh, warning, and critical gauges; configu
 Metrics are aggregated across the caller's permitted environments. No organization, environment, deployment, runtime, workflow, or user identifiers are emitted as labels; only the fixed destination-state and policy-version labels are used. This avoids tenant disclosure and unbounded label cardinality. Empty environment scope returns zero-valued metrics. The endpoint is read-only and does not trigger SLA evaluation, append audit records, dispatch commands, or mutate reconciliation state.
 
 The transition counters are derived from the existing append-only audit chain, not from a second metrics event store. Current-state gauges use the same Console timestamps and configurable SLA thresholds as the reconciliation health endpoint.
+
+
+## M1.10.13 — SLA alert policy and notification SPI
+
+SLA transitions can publish opt-in alert signals after the transaction commits. The policy is configured independently for warning, critical, and recovery transitions:
+
+- `wayang.console.reconciliation.sla.alerts.warning.enabled`
+- `wayang.console.reconciliation.sla.alerts.critical.enabled`
+- `wayang.console.reconciliation.sla.alerts.recovery.enabled`
+
+All default to `false`; equivalent environment variables are documented in `application.properties`. The authenticated operator can inspect the effective policy at:
+
+`GET /api/v1/console/deployments/reconciliation/sla/alert-policy`
+
+Extensions provide `ReconciliationSlaAlertSink` CDI beans. The Console emits a tenant/environment/deployment-scoped immutable transition signal through a CDI transactional event observer after the audit and reconciliation transaction commits. The core has no dependency on email, Slack, or webhook vendors. Signals are emitted only for actual persisted status transitions, so repeated worker passes do not duplicate alerts.
+
+**Delivery contract:** the core SPI is post-commit and best-effort; it is not a durable notification queue and does not claim retry or exactly-once delivery. A provider that requires durable delivery must hand off to an existing platform delivery facility or own its provider-specific delivery lifecycle outside the reconciliation transaction. Provider exceptions are isolated and logged; they cannot roll back reconciliation or block Runtime. No notification destination or secret is accepted from operator request payloads.
