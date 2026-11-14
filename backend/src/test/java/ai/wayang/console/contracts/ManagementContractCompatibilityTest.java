@@ -71,10 +71,7 @@ class ManagementContractCompatibilityTest {
 
     @Test
     void managementCommandFieldNumbersAndWireTypesRemainStable() {
-        var descriptor = PollCommandsResponse.getDescriptor()
-                .findNestedTypeByName("ManagementCommand");
-        // ManagementCommand is a top-level message in this schema.
-        descriptor = ai.wayang.console.contracts.management.v1.ManagementCommand.getDescriptor();
+        var descriptor = ai.wayang.console.contracts.management.v1.ManagementCommand.getDescriptor();
 
         assertField(descriptor, "command_id", 1, com.google.protobuf.Descriptors.FieldDescriptor.Type.STRING);
         assertField(descriptor, "idempotency_key", 2, com.google.protobuf.Descriptors.FieldDescriptor.Type.STRING);
