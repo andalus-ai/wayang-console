@@ -53,6 +53,14 @@ public class DeploymentReconciliationResource {
     }
 
     @GET
+    @Path("/reconciliation/health")
+    public DeploymentReconciliationService.ReconciliationHealth reconciliationHealth() {
+        operator.requireRead();
+        return reconciliation.reconciliationHealth(operator.organizationId(), operator.environmentIds(),
+                java.time.Instant.now());
+    }
+
+    @GET
     @Path("/reconciliation")
     public DeploymentReconciliationService.ReconciliationQueuePage queue(
             @QueryParam("state") String state,
