@@ -34,7 +34,7 @@ Management APIs and events carry explicit versions. Runtime capability negotiati
 
 [Wayang Core](https://github.com/andalus-ai/wayang-core) is the canonical target for contracts shared with Wayang: component/plugin descriptors, portable manifests and schemas, capability vocabulary, and versioned management/worker protocols. Console owns its persistence entities, repositories, application services, REST resources, authorization and UI. It must not import Wayang workflow execution modules.
 
-The current protobuf under contracts/proto remains the compatibility baseline until its source is migrated to Core and both runtime and Console consumers are verified. Do not duplicate or independently evolve it. See [shared Core integration](shared-core-integration.md).
+The current protobuf under contracts/proto remains a separately versioned schema/compatibility artifact; it is not the currently implemented REST management contract. REST/JSON remains the canonical implemented transport for the current M7 sequence. Do not migrate the schema to Core or claim transport interoperability until the reconciliation gates are met. See [management transport decision](management-transport-decision.md) and [shared Core integration](shared-core-integration.md).
 
 ## Plugin catalog boundary
 
