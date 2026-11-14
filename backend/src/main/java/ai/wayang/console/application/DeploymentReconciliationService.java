@@ -67,6 +67,8 @@ public class DeploymentReconciliationService {
     public record AuditEventView(long sequence, Instant occurredAt, String actor, String action,
             String outcome, String recordHash) {}
     public record AuditTimelinePage(List<AuditEventView> items, long total, int page, int size) {}
+    public record SlaTransitionView(long sequence, UUID deploymentId, Instant occurredAt, String actor, String fromStatus, String toStatus, String recordHash) {}
+    public record SlaTransitionPage(List<SlaTransitionView> items, long total, int page, int size) {}
 
     @Transactional
     public ReconciliationView setDesired(UUID organizationId, Set<UUID> environments,
@@ -353,6 +355,68 @@ public class DeploymentReconciliationService {
         String status = critical > 0 ? "CRITICAL" : warning > 0 ? "WARNING" : "HEALTHY";
         return new ReconciliationHealth(status, unresolved, fresh, warning, critical,
                 warningSeconds, criticalSeconds, "config-v1", oldestView, now);
+    }
+
+    /** Persist only real SLA transitions; candidate discovery is bounded and lock-free. */
+    @Transactional
+    public int evaluateSlaTransitions(Instant now) {
+        Instant warningCutoff = now.minusSeconds(warningSlaSeconds);
+        Instant criticalCutoff = now.minusSeconds(criticalSlaSeconds);
+        List<UUID> candidates = DeploymentReconciliationEntity.<DeploymentReconciliationEntity>find(
+                "slaStatus is null or (reconciliationState = 'IN_SYNC' and slaStatus <> 'HEALTHY') "
+                + "or (reconciliationState <> 'IN_SYNC' and ((updatedAt <= ?1 and slaStatus <> 'CRITICAL') "
+                + "or (updatedAt <= ?2 and updatedAt > ?1 and slaStatus <> 'WARNING') "
+                + "or (updatedAt > ?2 and slaStatus <> 'HEALTHY'))) order by updatedAt asc, deploymentId asc",
+                criticalCutoff, warningCutoff).range(0, 99).list().stream()
+                .map(row -> row.deploymentId).toList();
+        int transitions = 0;
+        for (UUID deploymentId : candidates) {
+            DeploymentEntity deployment = DeploymentEntity.findById(deploymentId, LockModeType.PESSIMISTIC_WRITE);
+            if (deployment == null) continue;
+            DeploymentReconciliationEntity row = DeploymentReconciliationEntity
+                    .<DeploymentReconciliationEntity>find("deploymentId", deploymentId)
+                    .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
+            if (row == null) continue;
+            String nextStatus;
+            if ("IN_SYNC".equals(row.reconciliationState)) nextStatus = "HEALTHY";
+            else {
+                long ageSeconds = Math.max(0, Duration.between(row.updatedAt, now).getSeconds());
+                nextStatus = ageSeconds >= criticalSlaSeconds ? "CRITICAL"
+                        : ageSeconds >= warningSlaSeconds ? "WARNING" : "HEALTHY";
+            }
+            if (nextStatus.equals(row.slaStatus)) continue;
+            String previousStatus = row.slaStatus == null ? "UNINITIALIZED" : row.slaStatus;
+            row.slaStatus = nextStatus;
+            row.slaEvaluatedAt = now;
+            row.persist();
+            audit.append(deployment.organizationId, deployment.environmentId,
+                    "console:reconciliation-sla-worker",
+                    "RECONCILIATION_SLA_" + previousStatus + "_TO_" + nextStatus,
+                    "DEPLOYMENT", deployment.id.toString(), now, "SUCCESS");
+            transitions++;
+        }
+        return transitions;
+    }
+
+    /** Read-only history from the existing audit chain, restricted to operator scope. */
+    @Transactional
+    public SlaTransitionPage slaHistory(UUID organizationId, Set<UUID> environments, int page, int size) {
+        validatePage(page, size);
+        if (environments == null || environments.isEmpty()) return new SlaTransitionPage(List.of(), 0, page, size);
+        String filter = "organizationId = ?1 and environmentId in ?2 and resourceType = 'DEPLOYMENT' and action like ?3";
+        String pattern = "RECONCILIATION\\_SLA\\_%";
+        long total = AuditRecordEntity.count(filter, organizationId, environments, pattern);
+        List<AuditRecordEntity> records = AuditRecordEntity.<AuditRecordEntity>find(
+                filter + " order by occurredAt desc, sequenceNo desc", organizationId, environments, pattern)
+                .page(Page.of(page, size)).list();
+        List<SlaTransitionView> items = records.stream().map(record -> {
+            String transition = record.action.substring("RECONCILIATION_SLA_".length());
+            String[] states = transition.split("_TO_", 2);
+            return new SlaTransitionView(record.sequenceNo == null ? 0L : record.sequenceNo,
+                    UUID.fromString(record.resourceId), record.occurredAt, record.actorSubject,
+                    states[0], states.length > 1 ? states[1] : "UNKNOWN", record.recordHash);
+        }).toList();
+        return new SlaTransitionPage(items, total, page, size);
     }
 
     private static long countState(String scope, UUID organizationId, Set<UUID> environments, String state) {
