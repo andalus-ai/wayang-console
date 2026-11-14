@@ -11,6 +11,8 @@ import ai.wayang.console.contracts.management.v1.PollCommandsResponse;
 import ai.wayang.console.contracts.management.v1.RegisterRuntimeRequest;
 import ai.wayang.console.contracts.management.v1.RegisterRuntimeResponse;
 import com.google.protobuf.CodedOutputStream;
+import com.google.protobuf.DescriptorProtos;
+import com.google.protobuf.Descriptors;
 import com.google.protobuf.DynamicMessage;
 import com.google.protobuf.Message;
 import com.google.protobuf.TextFormat;
@@ -73,11 +75,11 @@ class ManagementContractCompatibilityTest {
     void managementCommandFieldNumbersAndWireTypesRemainStable() {
         var descriptor = ai.wayang.console.contracts.management.v1.ManagementCommand.getDescriptor();
 
-        assertField(descriptor, "command_id", 1, com.google.protobuf.Descriptors.FieldDescriptor.Type.STRING);
-        assertField(descriptor, "idempotency_key", 2, com.google.protobuf.Descriptors.FieldDescriptor.Type.STRING);
-        assertField(descriptor, "command_type", 3, com.google.protobuf.Descriptors.FieldDescriptor.Type.STRING);
-        assertField(descriptor, "typed_payload", 4, com.google.protobuf.Descriptors.FieldDescriptor.Type.BYTES);
-        assertField(descriptor, "expires_at", 5, com.google.protobuf.Descriptors.FieldDescriptor.Type.MESSAGE);
+        assertField(descriptor, "command_id", 1, Descriptors.FieldDescriptor.Type.STRING);
+        assertField(descriptor, "idempotency_key", 2, Descriptors.FieldDescriptor.Type.STRING);
+        assertField(descriptor, "command_type", 3, Descriptors.FieldDescriptor.Type.STRING);
+        assertField(descriptor, "typed_payload", 4, Descriptors.FieldDescriptor.Type.BYTES);
+        assertField(descriptor, "expires_at", 5, Descriptors.FieldDescriptor.Type.MESSAGE);
     }
 
     @Test
@@ -106,10 +108,57 @@ class ManagementContractCompatibilityTest {
         assertArrayEquals(forwarded, forwardedAgain.toByteArray());
     }
 
-    private static void assertField(com.google.protobuf.Descriptors.Descriptor descriptor,
+    @Test
+    void previousSchemaCanForwardNewSchemaFieldsWithoutLosingThem() throws Exception {
+        Descriptors.Descriptor previous = compatibilityDescriptor(false);
+        Descriptors.Descriptor current = compatibilityDescriptor(true);
+
+        DynamicMessage currentMessage = DynamicMessage.newBuilder(current)
+                .setField(current.findFieldByName("name"), "runtime-01")
+                .setField(current.findFieldByName("future_value"), "new-runtime-feature")
+                .build();
+
+        DynamicMessage previousReader = DynamicMessage.parseFrom(previous, currentMessage.toByteArray());
+        assertEquals("runtime-01", previousReader.getField(previous.findFieldByName("name")));
+        assertTrue(previousReader.getUnknownFields().hasField(99));
+
+        DynamicMessage currentAfterForwarding =
+                DynamicMessage.parseFrom(current, previousReader.toByteArray());
+        assertEquals("new-runtime-feature",
+                currentAfterForwarding.getField(current.findFieldByName("future_value")));
+    }
+
+    private static Descriptors.Descriptor compatibilityDescriptor(boolean includeAdditiveField) throws Exception {
+        var nameField = DescriptorProtos.FieldDescriptorProto.newBuilder()
+                .setName("name")
+                .setNumber(1)
+                .setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL)
+                .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING)
+                .build();
+        var message = DescriptorProtos.DescriptorProto.newBuilder()
+                .setName("CompatibilityEnvelope")
+                .addField(nameField);
+        if (includeAdditiveField) {
+            message.addField(DescriptorProtos.FieldDescriptorProto.newBuilder()
+                    .setName("future_value")
+                    .setNumber(99)
+                    .setLabel(DescriptorProtos.FieldDescriptorProto.Label.LABEL_OPTIONAL)
+                    .setType(DescriptorProtos.FieldDescriptorProto.Type.TYPE_STRING));
+        }
+        var file = DescriptorProtos.FileDescriptorProto.newBuilder()
+                .setName("compatibility-envelope.proto")
+                .setPackage("wayang.management.compatibility.test")
+                .setSyntax("proto3")
+                .addMessageType(message)
+                .build();
+        return Descriptors.FileDescriptor.buildFrom(file, new Descriptors.FileDescriptor[0])
+                .findMessageTypeByName("CompatibilityEnvelope");
+    }
+
+    private static void assertField(Descriptors.Descriptor descriptor,
                                     String name,
                                     int number,
-                                    com.google.protobuf.Descriptors.FieldDescriptor.Type type) {
+                                    Descriptors.FieldDescriptor.Type type) {
         var field = descriptor.findFieldByName(name);
         assertNotNull(field, () -> "Missing field " + name);
         assertEquals(number, field.getNumber(), "Field number changed for " + name);
