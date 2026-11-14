@@ -28,7 +28,7 @@ public class DeploymentReconciliationService {
 
     public record ReconciliationView(UUID deploymentId, String desiredState, long generation,
             String observedState, String observedArtifactDigest, UUID observedCommandId,
-            long reportSequence, Instant observedAt, Instant receivedAt,
+            long reportSequence, Instant observedAt, Instant receivedAt, boolean observationFresh,
             String reconciliationState, String diagnostic, Instant updatedAt,
             int retryCount, Instant nextAttemptAt, Instant lastAttemptAt) {}
     public record Observation(String state, String artifactDigest, UUID commandId,
@@ -130,6 +130,44 @@ public class DeploymentReconciliationService {
         return view(row);
     }
 
+
+    /**
+     * Re-evaluates previously healthy or drifted PRESENT deployments after their last
+     * authenticated runtime observation expires. This is deliberately non-destructive:
+     * it marks the control-plane view as waiting and lets the existing bounded retry
+     * policy decide whether another apply command is safe.
+     *
+     * Candidate IDs are read without locks, then each deployment is locked before its
+     * reconciliation row to preserve the global deployment -> reconciliation lock order.
+     */
+    @Transactional
+    public int reconcileExpiredObservations(Instant now) {
+        Instant deadline = now.minus(OBSERVATION_TIMEOUT);
+        List<UUID> candidates = DeploymentReconciliationEntity.<DeploymentReconciliationEntity>find(
+                "desiredState = 'PRESENT' and receivedAt is not null and receivedAt <= ?1 "
+                        + "and reconciliationState in ('IN_SYNC','DRIFTED') order by receivedAt",
+                deadline).range(0, 99).list().stream().map(row -> row.deploymentId).toList();
+        int transitioned = 0;
+        for (UUID deploymentId : candidates) {
+            DeploymentEntity deployment = DeploymentEntity.findById(deploymentId, LockModeType.PESSIMISTIC_WRITE);
+            if (deployment == null) continue;
+            DeploymentReconciliationEntity row = DeploymentReconciliationEntity
+                    .<DeploymentReconciliationEntity>find("deploymentId", deploymentId)
+                    .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
+            if (row == null || !"PRESENT".equals(row.desiredState)
+                    || !Set.of("IN_SYNC", "DRIFTED").contains(row.reconciliationState)
+                    || row.receivedAt == null || row.receivedAt.isAfter(deadline)) continue;
+            String previousState = row.reconciliationState;
+            row.reconciliationState = "WAITING_RUNTIME";
+            row.nextAttemptAt = null;
+            row.diagnostic = "Runtime observation expired; previous reconciliation state was " + previousState;
+            row.updatedAt = now;
+            audit.append(deployment.organizationId, deployment.environmentId, "console:reconciliation-worker",
+                    "DEPLOYMENT_OBSERVATION_EXPIRED", "DEPLOYMENT", deployment.id.toString(), now, "WARNING");
+            transitioned++;
+        }
+        return transitioned;
+    }
 
     @Transactional
     public int scheduleTimedOutRetries(Instant now) {
@@ -358,9 +396,10 @@ public class DeploymentReconciliationService {
         return normalized;
     }
     private static ReconciliationView view(DeploymentReconciliationEntity r) {
+        boolean fresh = r.receivedAt != null && r.receivedAt.isAfter(Instant.now().minus(OBSERVATION_TIMEOUT));
         return new ReconciliationView(r.deploymentId, r.desiredState, r.generation, r.observedState,
                 r.observedArtifactDigest, r.observedCommandId, r.reportSequence, r.observedAt,
-                r.receivedAt, r.reconciliationState, r.diagnostic, r.updatedAt,
+                r.receivedAt, fresh, r.reconciliationState, r.diagnostic, r.updatedAt,
                 r.retryCount, r.nextAttemptAt, r.lastAttemptAt);
     }
 }

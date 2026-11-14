@@ -236,6 +236,40 @@ class DeploymentReconciliationIntegrationTest {
 
     @Test
     @TestTransaction
+    void expiredHealthyObservationReturnsToWaitingAndIsAuditedOnce() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "freshness-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "7".repeat(64);
+        var deployment = deployments.create(org, Set.of(env), runtime.id(), "freshness-" + UUID.randomUUID(),
+                "orders.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), deployment.id(), "PRESENT", "test-operator");
+        reconciliation.report(runtime, deployment.id(),
+                new DeploymentReconciliationService.Observation("RUNNING", digest, UUID.randomUUID(),
+                        1, 1, Instant.now().minus(Duration.ofMinutes(3)), null));
+
+        DeploymentReconciliationEntity row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        row.receivedAt = Instant.now().minus(Duration.ofMinutes(3));
+        row.persist();
+        var staleView = reconciliation.get(org, Set.of(env), deployment.id());
+        assertFalse(staleView.observationFresh());
+        assertEquals("IN_SYNC", staleView.reconciliationState());
+
+        Instant now = Instant.now();
+        assertEquals(1, reconciliation.reconcileExpiredObservations(now));
+        row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        assertEquals("WAITING_RUNTIME", row.reconciliationState);
+        assertTrue(row.diagnostic.contains("IN_SYNC"));
+        assertEquals(0, reconciliation.reconcileExpiredObservations(now.plusSeconds(30)));
+
+        var timeline = reconciliation.auditTimeline(org, Set.of(env), deployment.id(), 0, 20);
+        assertEquals(1, timeline.items().stream()
+                .filter(event -> "DEPLOYMENT_OBSERVATION_EXPIRED".equals(event.action())).count());
+    }
+
+    @Test
+    @TestTransaction
     void exhaustedReconciliationRetriesRequireManualIntervention() {
         UUID org = UUID.randomUUID(), env = UUID.randomUUID();
         var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
