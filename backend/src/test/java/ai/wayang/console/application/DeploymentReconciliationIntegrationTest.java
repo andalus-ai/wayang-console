@@ -367,6 +367,62 @@ class DeploymentReconciliationIntegrationTest {
     }
 
     @Test
+    @TestTransaction
+    void reconciliationSlaTransitionsAreDurableDeduplicatedAndScoped() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID(), outsideEnv = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "sla-transition-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "d".repeat(64);
+        var deployment = deployments.create(org, Set.of(env), runtime.id(), "sla-transition-" + UUID.randomUUID(),
+                "sla-transition.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), deployment.id(), "PRESENT", "test-operator");
+        DeploymentReconciliationEntity row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        Instant now = Instant.now();
+        row.updatedAt = now.minusSeconds(600);
+        row.persist();
+
+        assertEquals(1, reconciliation.evaluateSlaTransitions(now));
+        row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        assertEquals("WARNING", row.slaStatus);
+        assertEquals(now, row.slaEvaluatedAt);
+        assertEquals(0, reconciliation.evaluateSlaTransitions(now.plusSeconds(10)));
+
+        row.updatedAt = now.minusSeconds(1200);
+        row.persist();
+        assertEquals(1, reconciliation.evaluateSlaTransitions(now.plusSeconds(20)));
+        row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        assertEquals("CRITICAL", row.slaStatus);
+
+        row.updatedAt = now.plusSeconds(20);
+        row.persist();
+        assertEquals(1, reconciliation.evaluateSlaTransitions(now.plusSeconds(30)));
+        row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        assertEquals("HEALTHY", row.slaStatus);
+
+        var outsideEnrollment = registry.issueEnrollmentToken(org, outsideEnv, Duration.ofHours(1));
+        var outsideRegistration = registry.enroll(outsideEnrollment.token(), "sla-transition-outside-" + UUID.randomUUID(),
+                "1.2.0", null, null, null);
+        var outsideRuntime = registry.authenticate(outsideRegistration.registrationToken());
+        var outside = deployments.create(org, Set.of(outsideEnv), outsideRuntime.id(),
+                "sla-transition-outside-" + UUID.randomUUID(), "outside.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(outsideEnv), outside.id(), "PRESENT", "test-operator");
+        DeploymentReconciliationEntity outsideRow = DeploymentReconciliationEntity.find("deploymentId", outside.id()).firstResult();
+        outsideRow.updatedAt = now.minusSeconds(1200);
+        outsideRow.persist();
+        assertEquals(1, reconciliation.evaluateSlaTransitions(now.plusSeconds(40)));
+
+        var history = reconciliation.slaHistory(org, Set.of(env), 0, 10);
+        assertEquals(3L, history.total());
+        assertEquals(3, history.items().size());
+        assertEquals("HEALTHY", history.items().get(0).toStatus());
+        assertEquals("CRITICAL", history.items().get(1).toStatus());
+        assertEquals("WARNING", history.items().get(2).toStatus());
+        assertTrue(history.items().stream().allMatch(item -> deployment.id().equals(item.deploymentId())));
+        assertEquals(0L, reconciliation.slaHistory(org, Set.of(), 0, 10).total());
+    }
+
+    @Test
     void reconciliationSlaPolicyRejectsInvalidThresholds() {
         assertDoesNotThrow(() -> DeploymentReconciliationService.validateSlaThresholds(300, 900));
         assertDoesNotThrow(() -> DeploymentReconciliationService.validateSlaThresholds(60, 3600));
