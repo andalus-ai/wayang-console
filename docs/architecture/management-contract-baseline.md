@@ -10,8 +10,8 @@ contracts/proto/wayang/management/v1/management.proto
 Adjacent metadata schema:
 contracts/proto/wayang/management/v1/plugin_catalog.proto
 
-Reviewable examples:
-contracts/fixtures/management/v1/
+Reviewable examples and executable checks:
+contracts/fixtures/management/v1/ and backend/src/test/java/ai/wayang/console/contracts/ManagementContractCompatibilityTest.java
 
 ## RPC inventory
 
@@ -86,7 +86,7 @@ Field numbers and wire types remain defined exclusively by the .proto source. Th
 
 - The Console repository has application-level integration tests for enrollment/registry, inventory replacement, command polling and acknowledgement. These exercise Console services and persistence behavior.
 - The management .proto files are present under contracts/proto.
-- The backend Maven descriptor currently does not declare protobuf/gRPC code-generation or runtime dependencies. Do not infer that these messages are already compiled into a server implementation from the schema's presence alone.
+- The backend now compiles the protobuf schemas into Java messages and includes the protobuf Java runtime. This does not mean that a native gRPC server/client or deployed transport adapter exists; the Maven setup intentionally does not generate gRPC stubs.
 - The Wayang runtime module inspected for this baseline does not declare a dependency on a shared management-contract artifact. Its repository has other gRPC-related code, but that is not evidence that it consumes this management schema.
 - Wayang Core currently contains the wayang-core-model module only; the management-contract module described in its architecture is a target, not an existing published artifact.
 
@@ -101,7 +101,7 @@ Field numbers and wire types remain defined exclusively by the .proto source. Th
 ## Required migration gates
 
 1. Freeze current field numbers and wire types; reserve removed fields and never reuse numbers.
-2. Introduce generated message compilation and executable serialization goldens using a pinned protoc/runtime toolchain.
+2. Extend the newly added generated-message compilation and executable fixture round-trip checks with immutable historical binary goldens using the pinned protoc/runtime toolchain.
 3. Add unknown-field and additive-field compatibility tests.
 4. Identify and test the actual Wayang runtime management consumer and Console server adapter.
 5. Create the Core management-contract module and publish a versioned artifact only after the schema and compatibility tests are authoritative there.
@@ -117,4 +117,4 @@ Field numbers and wire types remain defined exclusively by the .proto source. Th
 - Treat changes to command payload semantics as versioned application-contract changes even though the payload is represented as bytes.
 - Keep timestamps in UTC and define lease/expiry semantics independently of wall-clock serialization.
 
-See the fixture coverage and promotion criteria in contracts/fixtures/management/v1/README.md.
+The focused test verifies TextFormat parsing, protobuf binary round-trips, RPC descriptor names, selected field numbers/types and unknown-field preservation. It does not yet compare immutable historical binary goldens or exercise actual runtime/Console transport adapters. See contracts/fixtures/management/v1/README.md.
