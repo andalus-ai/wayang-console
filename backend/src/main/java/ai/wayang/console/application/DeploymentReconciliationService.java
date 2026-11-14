@@ -6,6 +6,7 @@ import ai.wayang.console.adapter.persistence.ManagementCommandEntity;
 import ai.wayang.console.adapter.persistence.DeploymentReconciliationEntity;
 import ai.wayang.console.adapter.persistence.RuntimeInstanceEntity;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import jakarta.annotation.PostConstruct;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -27,6 +28,13 @@ public class DeploymentReconciliationService {
     private static final Duration OBSERVATION_TIMEOUT = Duration.ofMinutes(2);
     private static final int MAX_RETRIES = 5;
     @Inject AuditIntegrityService audit;
+    @Inject Event<SlaAlertTransition> slaAlertEvents;
+    @ConfigProperty(name = "wayang.console.reconciliation.sla.alerts.warning.enabled", defaultValue = "false")
+    boolean warningAlertsEnabled;
+    @ConfigProperty(name = "wayang.console.reconciliation.sla.alerts.critical.enabled", defaultValue = "false")
+    boolean criticalAlertsEnabled;
+    @ConfigProperty(name = "wayang.console.reconciliation.sla.alerts.recovery.enabled", defaultValue = "false")
+    boolean recoveryAlertsEnabled;
     @ConfigProperty(name = "wayang.console.reconciliation.sla.warning-seconds", defaultValue = "300")
     long warningSlaSeconds;
     @ConfigProperty(name = "wayang.console.reconciliation.sla.critical-seconds", defaultValue = "900")
@@ -69,6 +77,9 @@ public class DeploymentReconciliationService {
     public record AuditTimelinePage(List<AuditEventView> items, long total, int page, int size) {}
     public record SlaTransitionView(long sequence, UUID deploymentId, Instant occurredAt, String actor, String fromStatus, String toStatus, String recordHash) {}
     public record SlaTransitionPage(List<SlaTransitionView> items, long total, int page, int size) {}
+    public record SlaAlertPolicy(boolean warningEnabled, boolean criticalEnabled, boolean recoveryEnabled, String deliveryMode) {}
+    public record SlaAlertTransition(UUID organizationId, UUID environmentId, UUID deploymentId,
+            String fromStatus, String toStatus, Instant occurredAt, String actor) {}
     public record ReconciliationSlaMetrics(long unresolved, long fresh, long warning, long critical,
             long transitionsToHealthy, long transitionsToWarning, long transitionsToCritical,
             long warningThresholdSeconds, long criticalThresholdSeconds, String policyVersion, Instant generatedAt) {}
@@ -379,6 +390,11 @@ public class DeploymentReconciliationService {
                 toHealthy, toWarning, toCritical, warningSlaSeconds, criticalSlaSeconds, "config-v1", now);
     }
 
+    public SlaAlertPolicy reconciliationSlaAlertPolicy() {
+        return new SlaAlertPolicy(warningAlertsEnabled, criticalAlertsEnabled, recoveryAlertsEnabled,
+                "POST_COMMIT_SPI_BEST_EFFORT");
+    }
+
     /** Persist only real SLA transitions; candidate discovery is bounded and lock-free. */
     @Transactional
     public int evaluateSlaTransitions(Instant now) {
@@ -416,6 +432,16 @@ public class DeploymentReconciliationService {
                     "console:reconciliation-sla-worker",
                     "RECONCILIATION_SLA_" + previousStatus + "_TO_" + nextStatus,
                     "DEPLOYMENT", deployment.id.toString(), now, "SUCCESS");
+            boolean notify = ("WARNING".equals(nextStatus) && warningAlertsEnabled)
+                    || ("CRITICAL".equals(nextStatus) && criticalAlertsEnabled)
+                    || ("HEALTHY".equals(nextStatus)
+                        && ("WARNING".equals(previousStatus) || "CRITICAL".equals(previousStatus))
+                        && recoveryAlertsEnabled);
+            if (notify) {
+                slaAlertEvents.fire(new SlaAlertTransition(deployment.organizationId,
+                        deployment.environmentId, deployment.id, previousStatus, nextStatus,
+                        now, "console:reconciliation-sla-worker"));
+            }
             transitions++;
         }
         return transitions;
