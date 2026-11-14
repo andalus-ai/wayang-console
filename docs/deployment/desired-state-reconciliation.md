@@ -204,3 +204,16 @@ The age-band thresholds used by `GET /api/v1/console/deployments/reconciliation/
 They can be set through `WAYANG_CONSOLE_RECONCILIATION_SLA_WARNING_SECONDS` and `WAYANG_CONSOLE_RECONCILIATION_SLA_CRITICAL_SECONDS`. Startup validation requires a positive warning threshold, a critical threshold strictly greater than warning, and a critical threshold no greater than 30 days. Invalid configuration fails startup rather than silently producing misleading classifications.
 
 The health response reports the effective thresholds and `policyVersion=config-v1`. This is deployment-level configuration, not tenant-controlled input, so individual operators cannot weaken shared operational alerting. The endpoint remains read-only and organization/environment scoped.
+
+
+## M1.10.11 — durable reconciliation SLA transitions
+
+The scheduled reconciliation worker evaluates SLA transitions after observation expiry and retry scheduling. Each reconciliation row stores its last evaluated SLA status (HEALTHY, WARNING, or CRITICAL) and evaluation time. A transition is persisted only when the status changes; repeated worker evaluations do not emit duplicate audit records.
+
+The transition is appended to the existing per-organization/environment tamper-evident audit chain as a RECONCILIATION_SLA_<FROM>_TO_<TO> action. The first evaluation uses UNINITIALIZED as the source status. Returning to HEALTHY is recorded when an unresolved deployment falls below the warning threshold or when reconciliation reaches IN_SYNC.
+
+Operators can inspect the newest transitions through:
+
+GET /api/v1/console/deployments/reconciliation/sla/history?page=0&size=25
+
+The endpoint derives organization/environment scope from the authenticated operator, is read-only, and returns paginated transitions from the existing audit chain. No new event queue or independent history store is introduced. Evaluation is bounded to 100 candidates per worker pass and rechecks each candidate while holding locks in deployment -> reconciliation order.
