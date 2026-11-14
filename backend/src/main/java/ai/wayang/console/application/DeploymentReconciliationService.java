@@ -28,7 +28,7 @@ public class DeploymentReconciliationService {
 
     public record ReconciliationView(UUID deploymentId, String desiredState, long generation,
             String observedState, String observedArtifactDigest, UUID observedCommandId,
-            long reportSequence, Instant observedAt, Instant receivedAt,
+            long reportSequence, Instant observedAt, Instant receivedAt, boolean observationFresh,
             String reconciliationState, String diagnostic, Instant updatedAt,
             int retryCount, Instant nextAttemptAt, Instant lastAttemptAt) {}
     public record Observation(String state, String artifactDigest, UUID commandId,
@@ -37,6 +37,12 @@ public class DeploymentReconciliationService {
             UUID runtimeId, String workflowId, String workflowVersion, String deploymentStatus,
             ReconciliationView reconciliation) {}
     public record ReconciliationQueuePage(List<ReconciliationQueueItem> items, long total, int page, int size) {}
+    public record OldestUnresolved(UUID deploymentId, String deploymentKey, UUID environmentId,
+            String reconciliationState, Instant updatedAt, long ageSeconds) {}
+    public record ReconciliationFleetSummary(long total, long inSync, long drifted,
+            long waitingRuntime, long retrying, long manualIntervention, long other,
+            long dueRetries, long unresolvedSupersessions, OldestUnresolved oldestUnresolved,
+            Instant generatedAt) {}
     public record AuditEventView(long sequence, Instant occurredAt, String actor, String action,
             String outcome, String recordHash) {}
     public record AuditTimelinePage(List<AuditEventView> items, long total, int page, int size) {}
@@ -131,8 +137,47 @@ public class DeploymentReconciliationService {
     }
 
 
+    /**
+     * Re-evaluates previously healthy or drifted PRESENT deployments after their last
+     * authenticated runtime observation expires. This is deliberately non-destructive:
+     * it marks the control-plane view as waiting and lets the existing bounded retry
+     * policy decide whether another apply command is safe.
+     *
+     * Candidate IDs are read without locks, then each deployment is locked before its
+     * reconciliation row to preserve the global deployment -> reconciliation lock order.
+     */
+    @Transactional
+    public int reconcileExpiredObservations(Instant now) {
+        Instant deadline = now.minus(OBSERVATION_TIMEOUT);
+        List<UUID> candidates = DeploymentReconciliationEntity.<DeploymentReconciliationEntity>find(
+                "desiredState = 'PRESENT' and receivedAt is not null and receivedAt <= ?1 "
+                        + "and reconciliationState in ('IN_SYNC','DRIFTED') order by receivedAt",
+                deadline).range(0, 99).list().stream().map(row -> row.deploymentId).toList();
+        int transitioned = 0;
+        for (UUID deploymentId : candidates) {
+            DeploymentEntity deployment = DeploymentEntity.findById(deploymentId, LockModeType.PESSIMISTIC_WRITE);
+            if (deployment == null) continue;
+            DeploymentReconciliationEntity row = DeploymentReconciliationEntity
+                    .<DeploymentReconciliationEntity>find("deploymentId", deploymentId)
+                    .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult();
+            if (row == null || !"PRESENT".equals(row.desiredState)
+                    || !Set.of("IN_SYNC", "DRIFTED").contains(row.reconciliationState)
+                    || row.receivedAt == null || row.receivedAt.isAfter(deadline)) continue;
+            String previousState = row.reconciliationState;
+            row.reconciliationState = "WAITING_RUNTIME";
+            row.nextAttemptAt = null;
+            row.diagnostic = "Runtime observation expired; previous reconciliation state was " + previousState;
+            row.updatedAt = now;
+            audit.append(deployment.organizationId, deployment.environmentId, "console:reconciliation-worker",
+                    "DEPLOYMENT_OBSERVATION_EXPIRED", "DEPLOYMENT", deployment.id.toString(), now, "WARNING");
+            transitioned++;
+        }
+        return transitioned;
+    }
+
     @Transactional
     public int scheduleTimedOutRetries(Instant now) {
+        now = now.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         Instant deadline = now.minus(OBSERVATION_TIMEOUT);
         List<DeploymentReconciliationEntity> timedOut = DeploymentReconciliationEntity
                 .<DeploymentReconciliationEntity>find(
@@ -202,6 +247,53 @@ public class DeploymentReconciliationService {
                     deployment.workflowVersion, deployment.status, view(row));
         }).filter(java.util.Objects::nonNull).toList();
         return new ReconciliationQueuePage(items, total, page, size);
+    }
+
+    /**
+     * Read-only fleet-level reconciliation counters for the authenticated organization
+     * and environment scope. Counts are database aggregates; only the single oldest
+     * unresolved row is hydrated for the age indicator.
+     */
+    @Transactional
+    public ReconciliationFleetSummary fleetSummary(UUID organizationId, Set<UUID> environments, Instant now) {
+        if (environments == null || environments.isEmpty())
+            return new ReconciliationFleetSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, null, now);
+        String scope = "deploymentId in (select d.id from DeploymentEntity d "
+                + "where d.organizationId = ?1 and d.environmentId in ?2)";
+        long total = DeploymentReconciliationEntity.count(scope, organizationId, environments);
+        long inSync = countState(scope, organizationId, environments, "IN_SYNC");
+        long drifted = countState(scope, organizationId, environments, "DRIFTED");
+        long waiting = countState(scope, organizationId, environments, "WAITING_RUNTIME");
+        long retrying = countState(scope, organizationId, environments, "RETRYING");
+        long manual = countState(scope, organizationId, environments, "MANUAL_INTERVENTION");
+        long other = Math.max(0, total - inSync - drifted - waiting - retrying - manual);
+        long due = DeploymentReconciliationEntity.count(scope
+                + " and reconciliationState = 'RETRYING' and nextAttemptAt is not null and nextAttemptAt <= ?3",
+                organizationId, environments, now);
+        long unresolved = ManagementCommandEntity.count(
+                "organizationId = ?1 and environmentId in ?2 "
+                        + "and status in ('SUPERSESSION_REQUESTED','SUPERSESSION_UNCONFIRMED')",
+                organizationId, environments);
+        DeploymentReconciliationEntity oldest = DeploymentReconciliationEntity
+                .<DeploymentReconciliationEntity>find(scope
+                        + " and reconciliationState <> 'IN_SYNC' order by updatedAt asc, deploymentId asc",
+                        organizationId, environments).firstResult();
+        OldestUnresolved oldestView = null;
+        if (oldest != null) {
+            DeploymentEntity deployment = DeploymentEntity.findById(oldest.deploymentId);
+            if (deployment != null) {
+                long age = Math.max(0, Duration.between(oldest.updatedAt, now).getSeconds());
+                oldestView = new OldestUnresolved(oldest.deploymentId, deployment.deploymentId,
+                        deployment.environmentId, oldest.reconciliationState, oldest.updatedAt, age);
+            }
+        }
+        return new ReconciliationFleetSummary(total, inSync, drifted, waiting, retrying, manual,
+                other, due, unresolved, oldestView, now);
+    }
+
+    private static long countState(String scope, UUID organizationId, Set<UUID> environments, String state) {
+        return DeploymentReconciliationEntity.count(scope + " and reconciliationState = ?3",
+                organizationId, environments, state);
     }
 
     /** Read-only audit timeline backed by the existing tamper-evident audit chain. */
@@ -357,9 +449,10 @@ public class DeploymentReconciliationService {
         return normalized;
     }
     private static ReconciliationView view(DeploymentReconciliationEntity r) {
+        boolean fresh = r.receivedAt != null && r.receivedAt.isAfter(Instant.now().minus(OBSERVATION_TIMEOUT));
         return new ReconciliationView(r.deploymentId, r.desiredState, r.generation, r.observedState,
                 r.observedArtifactDigest, r.observedCommandId, r.reportSequence, r.observedAt,
-                r.receivedAt, r.reconciliationState, r.diagnostic, r.updatedAt,
+                r.receivedAt, fresh, r.reconciliationState, r.diagnostic, r.updatedAt,
                 r.retryCount, r.nextAttemptAt, r.lastAttemptAt);
     }
 }

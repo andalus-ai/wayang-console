@@ -45,6 +45,14 @@ public class DeploymentReconciliationResource {
     }
 
     @GET
+    @Path("/reconciliation/summary")
+    public DeploymentReconciliationService.ReconciliationFleetSummary reconciliationSummary() {
+        operator.requireRead();
+        return reconciliation.fleetSummary(operator.organizationId(), operator.environmentIds(),
+                java.time.Instant.now());
+    }
+
+    @GET
     @Path("/reconciliation")
     public DeploymentReconciliationService.ReconciliationQueuePage queue(
             @QueryParam("state") String state,

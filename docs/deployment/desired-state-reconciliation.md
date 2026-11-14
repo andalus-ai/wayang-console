@@ -163,3 +163,13 @@ An administrator can resolve an `SUPERSESSION_UNCONFIRMED` command only after in
 `POST /api/v1/console/deployments/{deploymentId}/commands/{commandId}/resolve-supersession`
 
 The request requires a reason and is appended to the audit chain. This is an explicit human assertion, not a remote cancellation signal. Until the command is runtime-confirmed or operator-resolved, retry dispatch remains blocked.
+
+## M1.10.7 — continuous observation convergence
+
+The scheduled reconciliation worker now re-evaluates the freshness of previously IN_SYNC and DRIFTED PRESENT deployments. When the last authenticated runtime observation is older than the two-minute observation window, the worker transitions the record to WAITING_RUNTIME, records the previous state in a bounded diagnostic, and appends DEPLOYMENT_OBSERVATION_EXPIRED to the existing audit chain.
+
+The observation read model exposes a derived observationFresh flag based on the server receipt timestamp. It is false when no runtime observation has ever been received or when the last report has expired. Runtime-provided timestamps remain evidence and are not used as the freshness clock.
+
+The worker processes a bounded batch and locks each deployment before its reconciliation row. It changes state only after rechecking the desired state, current reconciliation state, and receipt timestamp under lock. Repeated worker runs therefore do not emit duplicate expiry events or repeatedly reset the retry schedule. The existing timeout/backoff worker subsequently handles WAITING_RUNTIME; no second command queue or outbox is introduced.
+
+This milestone is observational and non-destructive. It does not stop workloads for ABSENT, auto-apply rollback, or infer that an unreachable runtime has terminated. Existing generation fencing, command supersession, bounded retries, and operator escalation remain authoritative.
