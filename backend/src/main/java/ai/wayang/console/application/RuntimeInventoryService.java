@@ -4,6 +4,7 @@ import ai.wayang.console.adapter.persistence.*;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.transaction.Transactional;
 import java.time.Instant;
+import jakarta.inject.Inject;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.Locale;
@@ -14,6 +15,7 @@ import java.util.UUID;
 
 @ApplicationScoped
 public class RuntimeInventoryService {
+    @Inject AuditIntegrityService auditIntegrity;
     private static final Duration RUNTIME_LEASE = Duration.ofMinutes(2);
     private static final int MAX_ITEMS = 1000;
     public record CapabilityInput(String componentId, String version, String capability) {}
@@ -81,17 +83,9 @@ public class RuntimeInventoryService {
         runtime.leaseExpiresAt = now.plus(RUNTIME_LEASE);
         runtime.status = "ONLINE";
 
-        AuditRecordEntity audit = new AuditRecordEntity();
-        audit.id = UUID.randomUUID();
-        audit.organizationId = runtime.organizationId;
-        audit.environmentId = runtime.environmentId;
-        audit.actorSubject = "runtime:" + runtime.instanceId;
-        audit.action = "RUNTIME_INVENTORY_REPORTED";
-        audit.resourceType = "RUNTIME";
-        audit.resourceId = runtime.id.toString();
-        audit.occurredAt = now;
-        audit.outcome = "SUCCESS";
-        audit.persist();
+        auditIntegrity.append(runtime.organizationId, runtime.environmentId,
+                "runtime:" + runtime.instanceId, "RUNTIME_INVENTORY_REPORTED",
+                "RUNTIME", runtime.id.toString(), now, "SUCCESS");
 
         return new InventoryResult(revision, safeCapabilities.size(), safeWorkflows.size(), now);
     }
