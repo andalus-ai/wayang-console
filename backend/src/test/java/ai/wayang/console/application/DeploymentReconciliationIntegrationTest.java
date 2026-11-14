@@ -226,7 +226,11 @@ class DeploymentReconciliationIntegrationTest {
         reconciliation.report(runtime, manual.id(), new DeploymentReconciliationService.Observation(
                 "FAILED", null, UUID.randomUUID(), 1, 1, Instant.now(), "test failure"));
 
-        var outside = deployments.create(org, Set.of(outsideEnv), runtime.id(), "fleet-outside-" + UUID.randomUUID(),
+        var outsideEnrollment = registry.issueEnrollmentToken(org, outsideEnv, Duration.ofHours(1));
+        var outsideRegistration = registry.enroll(outsideEnrollment.token(), "fleet-outside-" + UUID.randomUUID(),
+                "1.2.0", null, null, null);
+        var outsideRuntime = registry.authenticate(outsideRegistration.registrationToken());
+        var outside = deployments.create(org, Set.of(outsideEnv), outsideRuntime.id(), "fleet-outside-" + UUID.randomUUID(),
                 "outside.flow", "1.0.0", digest, digest, "test-operator");
         reconciliation.setDesired(org, Set.of(outsideEnv), outside.id(), "PRESENT", "test-operator");
 
