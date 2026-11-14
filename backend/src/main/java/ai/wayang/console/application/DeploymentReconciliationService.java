@@ -360,6 +360,7 @@ public class DeploymentReconciliationService {
     /** Persist only real SLA transitions; candidate discovery is bounded and lock-free. */
     @Transactional
     public int evaluateSlaTransitions(Instant now) {
+        now = now.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         Instant warningCutoff = now.minusSeconds(warningSlaSeconds);
         Instant criticalCutoff = now.minusSeconds(criticalSlaSeconds);
         List<UUID> candidates = DeploymentReconciliationEntity.<DeploymentReconciliationEntity>find(
