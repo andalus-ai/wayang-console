@@ -211,6 +211,54 @@ class DeploymentReconciliationIntegrationTest {
 
     @Test
     @TestTransaction
+    void fleetSummaryAggregatesOnlyAuthenticatedOrganizationAndEnvironmentScope() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID(), outsideEnv = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "fleet-summary-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "c".repeat(64);
+        var waiting = deployments.create(org, Set.of(env), runtime.id(), "fleet-waiting-" + UUID.randomUUID(),
+                "orders.flow", "1.0.0", digest, digest, "test-operator");
+        var manual = deployments.create(org, Set.of(env), runtime.id(), "fleet-manual-" + UUID.randomUUID(),
+                "payments.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), waiting.id(), "PRESENT", "test-operator");
+        reconciliation.setDesired(org, Set.of(env), manual.id(), "PRESENT", "test-operator");
+        reconciliation.report(runtime, manual.id(), new DeploymentReconciliationService.Observation(
+                "FAILED", null, UUID.randomUUID(), 1, 1, Instant.now(), "test failure"));
+
+        var outsideEnrollment = registry.issueEnrollmentToken(org, outsideEnv, Duration.ofHours(1));
+        var outsideRegistration = registry.enroll(outsideEnrollment.token(), "fleet-outside-" + UUID.randomUUID(),
+                "1.2.0", null, null, null);
+        var outsideRuntime = registry.authenticate(outsideRegistration.registrationToken());
+        var outside = deployments.create(org, Set.of(outsideEnv), outsideRuntime.id(), "fleet-outside-" + UUID.randomUUID(),
+                "outside.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(outsideEnv), outside.id(), "PRESENT", "test-operator");
+
+        DeploymentReconciliationEntity waitingRow = DeploymentReconciliationEntity.find("deploymentId", waiting.id()).firstResult();
+        waitingRow.reconciliationState = "RETRYING";
+        waitingRow.nextAttemptAt = Instant.now().minusSeconds(10);
+        waitingRow.updatedAt = Instant.now().minus(Duration.ofMinutes(5));
+        waitingRow.persist();
+
+        Instant now = Instant.now();
+        var summary = reconciliation.fleetSummary(org, Set.of(env), now);
+        assertEquals(2L, summary.total());
+        assertEquals(0L, summary.inSync());
+        assertEquals(1L, summary.retrying());
+        assertEquals(1L, summary.manualIntervention());
+        assertEquals(0L, summary.waitingRuntime());
+        assertEquals(1L, summary.dueRetries());
+        assertEquals(0L, summary.unresolvedSupersessions());
+        assertNotNull(summary.oldestUnresolved());
+        assertEquals(waiting.id(), summary.oldestUnresolved().deploymentId());
+        assertTrue(summary.oldestUnresolved().ageSeconds() >= 300);
+        assertEquals(now, summary.generatedAt());
+        assertEquals(0L, reconciliation.fleetSummary(UUID.randomUUID(), Set.of(env), now).total());
+        assertEquals(0L, reconciliation.fleetSummary(org, Set.of(), now).total());
+    }
+
+    @Test
+    @TestTransaction
     void operatorRetryHourlyLimitIsDurableAndReturnsTooManyRequests() {
         UUID org = UUID.randomUUID(), env = UUID.randomUUID();
         var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
