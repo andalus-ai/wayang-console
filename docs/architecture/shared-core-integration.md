@@ -63,3 +63,10 @@ A plugin being listed in Console does not mean it is approved, compatible, insta
 7. Keep Console persistence and management application services local.
 
 See [Wayang Core architecture](https://github.com/andalus-ai/wayang-core/blob/main/docs/ARCHITECTURE.md), [module strategy](https://github.com/andalus-ai/wayang-core/blob/main/docs/MODULE-STRATEGY.md), and [roadmap](https://github.com/andalus-ai/wayang-core/blob/main/docs/ROADMAP.md).
+
+
+## M7 contract baseline work
+
+The current Console-side field inventory and consumer-boundary findings are recorded in [management contract baseline](management-contract-baseline.md). Synthetic protobuf TextFormat examples for all five management RPC request/response pairs are under contracts/fixtures/management/v1.
+
+These are characterization inputs only. They are not binary serialization goldens and do not satisfy the M7 wire-compatibility acceptance gate until generated-message serialization, unknown-field tests, and actual runtime/Console adapter interoperability tests execute in CI.

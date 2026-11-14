@@ -1,0 +1,18 @@
+instance_id: "runtime-fixture-001"
+registration_id: "registration-fixture-001"
+capabilities {
+  component_id: "wayang.runtime"
+  version: "1.2.3"
+  capability: "workflow.execute"
+}
+capabilities {
+  component_id: "wayang.plugin.http"
+  version: "2.0.0"
+  capability: "connector.http"
+}
+workflows {
+  workflow_id: "orders.process"
+  workflow_version: "3.1.0"
+  definition_digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  deployment_id: "deployment-fixture-001"
+}

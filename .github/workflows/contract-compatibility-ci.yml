@@ -1,0 +1,37 @@
+name: Management Contract Compatibility
+
+on:
+  pull_request:
+    paths:
+      - "contracts/proto/**"
+      - "contracts/fixtures/**"
+      - "backend/pom.xml"
+      - "backend/src/test/java/ai/wayang/console/contracts/**"
+      - ".github/workflows/contract-compatibility-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "contracts/proto/**"
+      - "contracts/fixtures/**"
+      - "backend/pom.xml"
+      - "backend/src/test/java/ai/wayang/console/contracts/**"
+      - ".github/workflows/contract-compatibility-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  management-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Compile protobuf schema and run contract compatibility tests
+        run: mvn -B -f backend/pom.xml -Dtest=ManagementContractCompatibilityTest test
