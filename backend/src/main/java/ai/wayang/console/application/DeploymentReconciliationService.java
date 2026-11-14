@@ -69,6 +69,9 @@ public class DeploymentReconciliationService {
     public record AuditTimelinePage(List<AuditEventView> items, long total, int page, int size) {}
     public record SlaTransitionView(long sequence, UUID deploymentId, Instant occurredAt, String actor, String fromStatus, String toStatus, String recordHash) {}
     public record SlaTransitionPage(List<SlaTransitionView> items, long total, int page, int size) {}
+    public record ReconciliationSlaMetrics(long unresolved, long fresh, long warning, long critical,
+            long transitionsToHealthy, long transitionsToWarning, long transitionsToCritical,
+            long warningThresholdSeconds, long criticalThresholdSeconds, String policyVersion, Instant generatedAt) {}
 
     @Transactional
     public ReconciliationView setDesired(UUID organizationId, Set<UUID> environments,
@@ -355,6 +358,25 @@ public class DeploymentReconciliationService {
         String status = critical > 0 ? "CRITICAL" : warning > 0 ? "WARNING" : "HEALTHY";
         return new ReconciliationHealth(status, unresolved, fresh, warning, critical,
                 warningSeconds, criticalSeconds, "config-v1", oldestView, now);
+    }
+
+    /**
+     * Aggregate current SLA gauges and append-only transition counters for the authenticated
+     * organization/environment scope. Metric dimensions are intentionally not emitted as labels.
+     */
+    @Transactional
+    public ReconciliationSlaMetrics reconciliationSlaMetrics(UUID organizationId, Set<UUID> environments, Instant now) {
+        if (environments == null || environments.isEmpty()) {
+            return new ReconciliationSlaMetrics(0, 0, 0, 0, 0, 0, 0,
+                    warningSlaSeconds, criticalSlaSeconds, "config-v1", now);
+        }
+        ReconciliationHealth health = reconciliationHealth(organizationId, environments, now);
+        String scope = "organizationId = ?1 and environmentId in ?2 and resourceType = 'DEPLOYMENT' and action like ?3";
+        long toHealthy = AuditRecordEntity.count(scope, organizationId, environments, "RECONCILIATION_SLA_%_TO_HEALTHY");
+        long toWarning = AuditRecordEntity.count(scope, organizationId, environments, "RECONCILIATION_SLA_%_TO_WARNING");
+        long toCritical = AuditRecordEntity.count(scope, organizationId, environments, "RECONCILIATION_SLA_%_TO_CRITICAL");
+        return new ReconciliationSlaMetrics(health.unresolved(), health.fresh(), health.warning(), health.critical(),
+                toHealthy, toWarning, toCritical, warningSlaSeconds, criticalSlaSeconds, "config-v1", now);
     }
 
     /** Persist only real SLA transitions; candidate discovery is bounded and lock-free. */
