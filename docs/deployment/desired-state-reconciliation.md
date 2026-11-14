@@ -164,9 +164,12 @@ An administrator can resolve an `SUPERSESSION_UNCONFIRMED` command only after in
 
 The request requires a reason and is appended to the audit chain. This is an explicit human assertion, not a remote cancellation signal. Until the command is runtime-confirmed or operator-resolved, retry dispatch remains blocked.
 
+## M1.10.7 — continuous observation convergence
 
-## M1.10.8 — fleet reconciliation summary
+The scheduled reconciliation worker now re-evaluates the freshness of previously IN_SYNC and DRIFTED PRESENT deployments. When the last authenticated runtime observation is older than the two-minute observation window, the worker transitions the record to WAITING_RUNTIME, records the previous state in a bounded diagnostic, and appends DEPLOYMENT_OBSERVATION_EXPIRED to the existing audit chain.
 
-The read-only fleet summary is available at `GET /api/v1/console/deployments/reconciliation/summary`. It returns counts for `IN_SYNC`, `DRIFTED`, `WAITING_RUNTIME`, `RETRYING`, and `MANUAL_INTERVENTION`, plus any other states, due retry count, unresolved command supersession count, and the oldest unresolved deployment with its age. Counts are computed as scoped database aggregates; only the oldest unresolved row is hydrated for the age indicator.
+The observation read model exposes a derived observationFresh flag based on the server receipt timestamp. It is false when no runtime observation has ever been received or when the last report has expired. Runtime-provided timestamps remain evidence and are not used as the freshness clock.
 
-The endpoint derives organization and environment scope from the authenticated operator and accepts no tenant identifiers from the caller. An empty environment scope returns an all-zero summary. The endpoint is read-only: it does not dispatch commands, mutate reconciliation state, or infer that a runtime has stopped. The existing paginated reconciliation queue remains the drill-down surface for individual deployments.
+The worker processes a bounded batch and locks each deployment before its reconciliation row. It changes state only after rechecking the desired state, current reconciliation state, and receipt timestamp under lock. Repeated worker runs therefore do not emit duplicate expiry events or repeatedly reset the retry schedule. The existing timeout/backoff worker subsequently handles WAITING_RUNTIME; no second command queue or outbox is introduced.
+
+This milestone is observational and non-destructive. It does not stop workloads for ABSENT, auto-apply rollback, or infer that an unreachable runtime has terminated. Existing generation fencing, command supersession, bounded retries, and operator escalation remain authoritative.
