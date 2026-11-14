@@ -81,7 +81,7 @@ public class PluginApprovalService {
                 throw new WebApplicationException("Only ACTIVE catalog entries may be approved", 409);
             ensureDistributable(entry);
         }
-        Instant now = Instant.now();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         String status = action.equals("APPROVE") ? "APPROVED" : "REJECTED";
         state.approvalStatus = status; state.decidedBy = actor; state.decidedAt = now; state.reason = reason;
         event(entry, "PENDING", status, actor, reason, now);
