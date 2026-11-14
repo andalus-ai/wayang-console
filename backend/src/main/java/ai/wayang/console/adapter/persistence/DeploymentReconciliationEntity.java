@@ -26,4 +26,6 @@ public class DeploymentReconciliationEntity extends PanacheEntityBase {
     @Column(name = "retry_count", nullable = false) public int retryCount;
     @Column(name = "next_attempt_at") public Instant nextAttemptAt;
     @Column(name = "last_attempt_at") public Instant lastAttemptAt;
+    @Column(name = "sla_status", length = 16) public String slaStatus;
+    @Column(name = "sla_evaluated_at") public Instant slaEvaluatedAt;
 }
