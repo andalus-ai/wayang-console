@@ -92,25 +92,25 @@ public class DeploymentReconciliationResource {
                 "Configured warning threshold in seconds.", metrics.warningThresholdSeconds());
         appendGauge(out, "wayang_console_reconciliation_sla_critical_threshold_seconds",
                 "Configured critical threshold in seconds.", metrics.criticalThresholdSeconds());
-        out.append("# HELP wayang_console_reconciliation_sla_transitions_total Append-only SLA transition events by destination state.\\n")
-                .append("# TYPE wayang_console_reconciliation_sla_transitions_total counter\\n")
+        out.append("# HELP wayang_console_reconciliation_sla_transitions_total Append-only SLA transition events by destination state.\n")
+                .append("# TYPE wayang_console_reconciliation_sla_transitions_total counter\n")
                 .append("wayang_console_reconciliation_sla_transitions_total{to_status=\"HEALTHY\"} ")
-                .append(metrics.transitionsToHealthy()).append('\\n')
+                .append(metrics.transitionsToHealthy()).append('\n')
                 .append("wayang_console_reconciliation_sla_transitions_total{to_status=\"WARNING\"} ")
-                .append(metrics.transitionsToWarning()).append('\\n')
+                .append(metrics.transitionsToWarning()).append('\n')
                 .append("wayang_console_reconciliation_sla_transitions_total{to_status=\"CRITICAL\"} ")
-                .append(metrics.transitionsToCritical()).append('\\n');
-        out.append("# HELP wayang_console_reconciliation_sla_policy_info Active SLA policy version.\\n")
-                .append("# TYPE wayang_console_reconciliation_sla_policy_info gauge\\n")
+                .append(metrics.transitionsToCritical()).append('\n');
+        out.append("# HELP wayang_console_reconciliation_sla_policy_info Active SLA policy version.\n")
+                .append("# TYPE wayang_console_reconciliation_sla_policy_info gauge\n")
                 .append("wayang_console_reconciliation_sla_policy_info{version=\"")
-                .append(metrics.policyVersion()).append("\"} 1\\n");
+                .append(metrics.policyVersion()).append("\"} 1\n");
         return out.toString();
     }
 
     private static void appendGauge(StringBuilder out, String name, String help, long value) {
-        out.append("# HELP ").append(name).append(' ').append(help).append('\\n')
-                .append("# TYPE ").append(name).append(" gauge\\n")
-                .append(name).append(' ').append(value).append('\\n');
+        out.append("# HELP ").append(name).append(' ').append(help).append('\n')
+                .append("# TYPE ").append(name).append(" gauge\n")
+                .append(name).append(' ').append(value).append('\n');
     }
 
     @GET
