@@ -7,6 +7,8 @@ import ai.wayang.console.adapter.persistence.DeploymentReconciliationEntity;
 import ai.wayang.console.adapter.persistence.RuntimeInstanceEntity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.annotation.PostConstruct;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import jakarta.persistence.LockModeType;
 import jakarta.transaction.Transactional;
 import jakarta.ws.rs.NotFoundException;
@@ -25,6 +27,22 @@ public class DeploymentReconciliationService {
     private static final Duration OBSERVATION_TIMEOUT = Duration.ofMinutes(2);
     private static final int MAX_RETRIES = 5;
     @Inject AuditIntegrityService audit;
+    @ConfigProperty(name = "wayang.console.reconciliation.sla.warning-seconds", defaultValue = "300")
+    long warningSlaSeconds;
+    @ConfigProperty(name = "wayang.console.reconciliation.sla.critical-seconds", defaultValue = "900")
+    long criticalSlaSeconds;
+
+    @PostConstruct
+    void validateSlaPolicy() {
+        validateSlaThresholds(warningSlaSeconds, criticalSlaSeconds);
+    }
+
+    static void validateSlaThresholds(long warningSeconds, long criticalSeconds) {
+        long maximumSeconds = Duration.ofDays(30).toSeconds();
+        if (warningSeconds <= 0 || criticalSeconds <= warningSeconds || criticalSeconds > maximumSeconds) {
+            throw new IllegalStateException("Reconciliation SLA thresholds must satisfy 0 < warning-seconds < critical-seconds <= 2592000");
+        }
+    }
 
     public record ReconciliationView(UUID deploymentId, String desiredState, long generation,
             String observedState, String observedArtifactDigest, UUID observedCommandId,
@@ -45,7 +63,7 @@ public class DeploymentReconciliationService {
             Instant generatedAt) {}
     public record ReconciliationHealth(String status, long unresolved, long fresh,
             long warning, long critical, long warningThresholdSeconds,
-            long criticalThresholdSeconds, OldestUnresolved oldestUnresolved, Instant generatedAt) {}
+            long criticalThresholdSeconds, String policyVersion, OldestUnresolved oldestUnresolved, Instant generatedAt) {}
     public record AuditEventView(long sequence, Instant occurredAt, String actor, String action,
             String outcome, String recordHash) {}
     public record AuditTimelinePage(List<AuditEventView> items, long total, int page, int size) {}
@@ -301,11 +319,11 @@ public class DeploymentReconciliationService {
      */
     @Transactional
     public ReconciliationHealth reconciliationHealth(UUID organizationId, Set<UUID> environments, Instant now) {
-        final long warningSeconds = 300;
-        final long criticalSeconds = 900;
+        final long warningSeconds = warningSlaSeconds;
+        final long criticalSeconds = criticalSlaSeconds;
         if (environments == null || environments.isEmpty())
             return new ReconciliationHealth("HEALTHY", 0, 0, 0, 0,
-                    warningSeconds, criticalSeconds, null, now);
+                    warningSeconds, criticalSeconds, "config-v1", null, now);
 
         String scope = "deploymentId in (select d.id from DeploymentEntity d "
                 + "where d.organizationId = ?1 and d.environmentId in ?2)"
@@ -334,7 +352,7 @@ public class DeploymentReconciliationService {
         }
         String status = critical > 0 ? "CRITICAL" : warning > 0 ? "WARNING" : "HEALTHY";
         return new ReconciliationHealth(status, unresolved, fresh, warning, critical,
-                warningSeconds, criticalSeconds, oldestView, now);
+                warningSeconds, criticalSeconds, "config-v1", oldestView, now);
     }
 
     private static long countState(String scope, UUID organizationId, Set<UUID> environments, String state) {
