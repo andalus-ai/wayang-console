@@ -19,7 +19,7 @@
   </dependency></dependencies></dependencyManagement>
   <dependencies>
     <dependency><groupId>com.google.protobuf</groupId><artifactId>protobuf-java</artifactId><version>${protobuf.version}</version></dependency>
-    <dependency><groupId>com.google.protobuf</groupId><artifactId>protobuf-java-util</artifactId><version>${protobuf.version}</version></dependency>
+    <dependency><groupId>com.google.protobuf</groupId><artifactId>protobuf-java-util</artifactId><version>${protobuf.version}</version><scope>test</scope></dependency>
     <dependency><groupId>io.quarkus</groupId><artifactId>quarkus-rest-jackson</artifactId></dependency>
     <dependency><groupId>io.quarkus</groupId><artifactId>quarkus-smallrye-health</artifactId></dependency>
     <dependency><groupId>io.quarkus</groupId><artifactId>quarkus-smallrye-openapi</artifactId></dependency>
