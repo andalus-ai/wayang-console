@@ -385,7 +385,7 @@ class DeploymentReconciliationIntegrationTest {
         assertEquals(1, reconciliation.evaluateSlaTransitions(now));
         row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
         assertEquals("WARNING", row.slaStatus);
-        assertEquals(now, row.slaEvaluatedAt);
+        assertEquals(now.truncatedTo(ChronoUnit.MICROS), row.slaEvaluatedAt);
         assertEquals(0, reconciliation.evaluateSlaTransitions(now.plusSeconds(10)));
 
         row.updatedAt = now.minusSeconds(1200);
