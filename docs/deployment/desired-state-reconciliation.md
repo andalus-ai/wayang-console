@@ -217,3 +217,17 @@ Operators can inspect the newest transitions through:
 GET /api/v1/console/deployments/reconciliation/sla/history?page=0&size=25
 
 The endpoint derives organization/environment scope from the authenticated operator, is read-only, and returns paginated transitions from the existing audit chain. No new event queue or independent history store is introduced. Evaluation is bounded to 100 candidates per worker pass and rechecks each candidate while holding locks in deployment -> reconciliation order.
+
+
+## M1.10.12 — scoped SLA metrics and Prometheus exposition
+
+The Console exposes aggregate SLA metrics for the authenticated operator's organization and permitted environments:
+
+- JSON: `GET /api/v1/console/deployments/reconciliation/sla/metrics`
+- Prometheus text format: `GET /api/v1/console/deployments/reconciliation/sla/metrics/prometheus`
+
+The exposition includes unresolved, fresh, warning, and critical gauges; configured warning and critical thresholds; and append-only transition counters by destination state. The endpoint is protected by the same authenticated operator access check as the reconciliation health and history endpoints. A Prometheus scraper must use a dedicated read-authorized operator identity and bearer token.
+
+Metrics are aggregated across the caller's permitted environments. No organization, environment, deployment, runtime, workflow, or user identifiers are emitted as labels; only the fixed destination-state and policy-version labels are used. This avoids tenant disclosure and unbounded label cardinality. Empty environment scope returns zero-valued metrics. The endpoint is read-only and does not trigger SLA evaluation, append audit records, dispatch commands, or mutate reconciliation state.
+
+The transition counters are derived from the existing append-only audit chain, not from a second metrics event store. Current-state gauges use the same Console timestamps and configurable SLA thresholds as the reconciliation health endpoint.
