@@ -19,6 +19,7 @@ public class DeploymentReconciliationWorker {
         Instant now = Instant.now();
         reconciliation.reconcileExpiredObservations(now);
         reconciliation.scheduleTimedOutRetries(now);
+        reconciliation.evaluateSlaTransitions(now);
         for (var deploymentId : reconciliation.dueRetryDeploymentIds(now)) {
             commands.dispatchDueRetry(deploymentId, now);
         }
