@@ -86,16 +86,17 @@ Field numbers and wire types remain defined exclusively by the .proto source. Th
 
 - Console application-level integration tests cover enrollment/registry, inventory replacement, command polling and acknowledgement. These exercise Console services and persistence behavior.
 - The management .proto files are present under contracts/proto and are compiled into generated Java message classes for contract tests. This does not create a native gRPC server/client.
-- The current Console command transport inspected at `backend/src/main/java/ai/wayang/console/api/RuntimeCommandResource.java` is REST/JSON: `POST /api/v1/runtime/commands/poll` and `POST /api/v1/runtime/commands/{commandId}/ack`. The current HTTP resource is not an adapter for the five protobuf RPCs.
-- Wayang's `wayang-api-rest` module has Quarkus gRPC enabled and `WayangGrpcService` implements the application API for workflow runs, tasks, messages and run watching. Its RPC surface is not the `RuntimeManagement` service defined here. The Wayang gRPC service therefore must not be treated as a management-protocol consumer.
-- The inspected Wayang runtime/API module does not declare a dependency on a shared management-contract artifact. Existing gRPC support is a separate API surface.
+- Console already exposes the five broad management operations through REST/JSON resources: enrollment and heartbeat at `backend/src/main/java/ai/wayang/console/api/RuntimeRegistryResource.java`, inventory reporting in the same resource, and command polling/acknowledgement at `backend/src/main/java/ai/wayang/console/api/RuntimeCommandResource.java`. These are real application endpoints, but they are not generated gRPC adapters and are not wire-equivalent to the protobuf messages.
+- The REST and protobuf shapes currently differ in material ways. REST enrollment accepts an enrollment token and returns a registration token; the protobuf Register response has no registration-token field. REST heartbeat/inventory/command calls authenticate with a bearer registration token rather than carrying instance and registration IDs in each request. The REST enrollment request currently has no environment ID, while protobuf RuntimeIdentity does. The two contracts must be reconciled deliberately; do not assume field-by-field mapping is lossless.
+- Wayang's `wayang-api-rest` module has Quarkus gRPC enabled and `WayangGrpcService` implements workflow runs, tasks, messages and run watching. Its RPC surface is not the `RuntimeManagement` service defined here. It must not be treated as a management-protocol consumer.
+- The inspected Wayang runtime/API modules do not declare a dependency on a shared management-contract artifact. Existing gRPC support is a separate API surface.
 - Wayang Core currently contains the `wayang-core-model` module only. There is no management-contract module or released artifact to consume yet.
 
 ### Consequence for M7
 
-The present protobuf schema is a target contract, not an already interoperable cross-repository transport. Before extraction, the project must make an explicit choice between (a) implementing the five RPCs as a real runtime-to-Console gRPC protocol or (b) defining a versioned HTTP/JSON management contract and treating protobuf as a future/alternate transport. Do not silently equate REST resources with protobuf RPCs or introduce a partial adapter that only covers poll/ack.
+The current system has a functioning REST/JSON management surface and a separate, currently unconsumed protobuf/gRPC contract. The next design decision is whether to (a) make protobuf/gRPC the canonical cross-process contract and adapt the existing Console services without changing their ownership, or (b) promote the REST/JSON contract to canonical status and treat protobuf as an optional transport. The decision must account for the current REST-only registration-token issuance and bearer-token authentication model; simply generating gRPC stubs will not make the protocols equivalent.
 
-The first implementation should also define authentication and tenant binding, registration credential issuance/rotation, lease semantics, idempotency, command payload versioning, retry/backoff, and protocol negotiation consistently across both sides.
+Whichever transport is selected, define authentication and tenant binding, registration credential issuance/rotation, lease semantics, idempotency, command payload versioning, retry/backoff, and protocol negotiation consistently across both sides.
 
 ## Ownership constraints
 
