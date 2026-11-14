@@ -21,25 +21,26 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class ManagementContractCompatibilityTest {
-    private record Fixture(String resource, Supplier<? extends Message.Builder> builderFactory) {}
+    private record Fixture(String resource, String goldenResource, Supplier<? extends Message.Builder> builderFactory) {}
 
     private static final List<Fixture> FIXTURES = List.of(
-            new Fixture("management/v1/register-request.textproto", RegisterRuntimeRequest::newBuilder),
-            new Fixture("management/v1/register-response.textproto", RegisterRuntimeResponse::newBuilder),
-            new Fixture("management/v1/heartbeat-request.textproto", HeartbeatRequest::newBuilder),
-            new Fixture("management/v1/heartbeat-response.textproto", HeartbeatResponse::newBuilder),
-            new Fixture("management/v1/inventory-report-request.textproto", InventoryReportRequest::newBuilder),
-            new Fixture("management/v1/inventory-report-response.textproto", InventoryReportResponse::newBuilder),
-            new Fixture("management/v1/poll-commands-request.textproto", PollCommandsRequest::newBuilder),
-            new Fixture("management/v1/poll-commands-response.textproto", PollCommandsResponse::newBuilder),
-            new Fixture("management/v1/acknowledge-command-request.textproto", AcknowledgeCommandRequest::newBuilder),
-            new Fixture("management/v1/acknowledge-command-response.textproto", AcknowledgeCommandResponse::newBuilder)
+            new Fixture("management/v1/register-request.textproto", "management/v1/golden/register-request.bin.hex", RegisterRuntimeRequest::newBuilder),
+            new Fixture("management/v1/register-response.textproto", "management/v1/golden/register-response.bin.hex", RegisterRuntimeResponse::newBuilder),
+            new Fixture("management/v1/heartbeat-request.textproto", "management/v1/golden/heartbeat-request.bin.hex", HeartbeatRequest::newBuilder),
+            new Fixture("management/v1/heartbeat-response.textproto", "management/v1/golden/heartbeat-response.bin.hex", HeartbeatResponse::newBuilder),
+            new Fixture("management/v1/inventory-report-request.textproto", "management/v1/golden/inventory-report-request.bin.hex", InventoryReportRequest::newBuilder),
+            new Fixture("management/v1/inventory-report-response.textproto", "management/v1/golden/inventory-report-response.bin.hex", InventoryReportResponse::newBuilder),
+            new Fixture("management/v1/poll-commands-request.textproto", "management/v1/golden/poll-commands-request.bin.hex", PollCommandsRequest::newBuilder),
+            new Fixture("management/v1/poll-commands-response.textproto", "management/v1/golden/poll-commands-response.bin.hex", PollCommandsResponse::newBuilder),
+            new Fixture("management/v1/acknowledge-command-request.textproto", "management/v1/golden/acknowledge-command-request.bin.hex", AcknowledgeCommandRequest::newBuilder),
+            new Fixture("management/v1/acknowledge-command-response.textproto", "management/v1/golden/acknowledge-command-response.bin.hex", AcknowledgeCommandResponse::newBuilder)
     );
 
     @Test
@@ -59,6 +60,16 @@ class ManagementContractCompatibilityTest {
             Message decoded = DynamicMessage.parseFrom(parsed.getDescriptorForType(), encoded);
             assertArrayEquals(encoded, decoded.toByteArray(),
                     () -> "Protobuf binary round-trip changed fixture: " + fixture.resource());
+
+            var goldenStream = getClass().getClassLoader().getResourceAsStream(fixture.goldenResource());
+            assertNotNull(goldenStream, () -> "Missing immutable wire golden: " + fixture.goldenResource());
+            String goldenHex;
+            try (var goldenReader = new InputStreamReader(goldenStream, StandardCharsets.US_ASCII)) {
+                goldenHex = goldenReader.lines().reduce("", String::concat).trim();
+            }
+            byte[] golden = HexFormat.of().parseHex(goldenHex);
+            assertArrayEquals(golden, encoded,
+                    () -> "Serialized bytes differ from immutable wire golden: " + fixture.resource());
         }
     }
 
