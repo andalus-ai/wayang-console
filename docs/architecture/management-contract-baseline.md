@@ -109,7 +109,7 @@ Whichever transport is selected, define authentication and tenant binding, regis
 ## Required migration gates
 
 1. Freeze current field numbers and wire types; reserve removed fields and never reuse field numbers.
-2. Add immutable historical binary goldens for every request/response fixture using the pinned protoc/runtime toolchain.
+2. Keep immutable binary goldens for every request/response fixture and verify generated Java serialization against them in CI.
 3. Keep additive-field compatibility tests that parse new messages with an old descriptor and forward them without losing unknown fields.
 4. Specify the management transport and implement/test the actual Wayang runtime management agent and Console adapter end-to-end.
 5. Create the Core management-contract module and publish a versioned artifact only after the schema and compatibility tests are authoritative there.
@@ -125,4 +125,4 @@ Whichever transport is selected, define authentication and tenant binding, regis
 - Treat changes to command payload semantics as versioned application-contract changes even though the payload is represented as bytes.
 - Keep timestamps in UTC and define lease/expiry semantics independently of wall-clock serialization.
 
-The focused test verifies TextFormat parsing, protobuf binary round-trips, RPC descriptor names, selected field numbers/types, unknown-field preservation, and forwarding from a new descriptor through an older descriptor. It does not yet compare immutable historical binary goldens or exercise actual runtime/Console transport adapters. See contracts/fixtures/management/v1/README.md.
+The focused test verifies TextFormat parsing, protobuf binary round-trips, exact serialized-byte equality against ten immutable hexadecimal goldens, RPC descriptor names, selected field numbers/types, unknown-field preservation, and forwarding from a new descriptor through an older descriptor. It does not exercise actual runtime/Console transport adapters. See contracts/fixtures/management/v1/README.md.
