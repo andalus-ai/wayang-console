@@ -37,6 +37,12 @@ public class DeploymentReconciliationService {
             UUID runtimeId, String workflowId, String workflowVersion, String deploymentStatus,
             ReconciliationView reconciliation) {}
     public record ReconciliationQueuePage(List<ReconciliationQueueItem> items, long total, int page, int size) {}
+    public record OldestUnresolved(UUID deploymentId, String deploymentKey, UUID environmentId,
+            String reconciliationState, Instant updatedAt, long ageSeconds) {}
+    public record ReconciliationFleetSummary(long total, long inSync, long drifted,
+            long waitingRuntime, long retrying, long manualIntervention, long other,
+            long dueRetries, long unresolvedSupersessions, OldestUnresolved oldestUnresolved,
+            Instant generatedAt) {}
     public record AuditEventView(long sequence, Instant occurredAt, String actor, String action,
             String outcome, String recordHash) {}
     public record AuditTimelinePage(List<AuditEventView> items, long total, int page, int size) {}
@@ -203,6 +209,53 @@ public class DeploymentReconciliationService {
                     deployment.workflowVersion, deployment.status, view(row));
         }).filter(java.util.Objects::nonNull).toList();
         return new ReconciliationQueuePage(items, total, page, size);
+    }
+
+    /**
+     * Read-only fleet-level reconciliation counters for the authenticated organization
+     * and environment scope. Counts are database aggregates; only the single oldest
+     * unresolved row is hydrated for the age indicator.
+     */
+    @Transactional
+    public ReconciliationFleetSummary fleetSummary(UUID organizationId, Set<UUID> environments, Instant now) {
+        if (environments == null || environments.isEmpty())
+            return new ReconciliationFleetSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, null, now);
+        String scope = "deploymentId in (select d.id from DeploymentEntity d "
+                + "where d.organizationId = ?1 and d.environmentId in ?2)";
+        long total = DeploymentReconciliationEntity.count(scope, organizationId, environments);
+        long inSync = countState(scope, organizationId, environments, "IN_SYNC");
+        long drifted = countState(scope, organizationId, environments, "DRIFTED");
+        long waiting = countState(scope, organizationId, environments, "WAITING_RUNTIME");
+        long retrying = countState(scope, organizationId, environments, "RETRYING");
+        long manual = countState(scope, organizationId, environments, "MANUAL_INTERVENTION");
+        long other = Math.max(0, total - inSync - drifted - waiting - retrying - manual);
+        long due = DeploymentReconciliationEntity.count(scope
+                + " and reconciliationState = 'RETRYING' and nextAttemptAt is not null and nextAttemptAt <= ?3",
+                organizationId, environments, now);
+        long unresolved = ManagementCommandEntity.count(
+                "organizationId = ?1 and environmentId in ?2 "
+                        + "and status in ('SUPERSESSION_REQUESTED','SUPERSESSION_UNCONFIRMED')",
+                organizationId, environments);
+        DeploymentReconciliationEntity oldest = DeploymentReconciliationEntity
+                .<DeploymentReconciliationEntity>find(scope
+                        + " and reconciliationState <> 'IN_SYNC' order by updatedAt asc, deploymentId asc",
+                        organizationId, environments).firstResult();
+        OldestUnresolved oldestView = null;
+        if (oldest != null) {
+            DeploymentEntity deployment = DeploymentEntity.findById(oldest.deploymentId);
+            if (deployment != null) {
+                long age = Math.max(0, Duration.between(oldest.updatedAt, now).getSeconds());
+                oldestView = new OldestUnresolved(oldest.deploymentId, deployment.deploymentId,
+                        deployment.environmentId, oldest.reconciliationState, oldest.updatedAt, age);
+            }
+        }
+        return new ReconciliationFleetSummary(total, inSync, drifted, waiting, retrying, manual,
+                other, due, unresolved, oldestView, now);
+    }
+
+    private static long countState(String scope, UUID organizationId, Set<UUID> environments, String state) {
+        return DeploymentReconciliationEntity.count(scope + " and reconciliationState = ?3",
+                organizationId, environments, state);
     }
 
     /** Read-only audit timeline backed by the existing tamper-evident audit chain. */
