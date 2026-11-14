@@ -367,6 +367,15 @@ class DeploymentReconciliationIntegrationTest {
     }
 
     @Test
+    void reconciliationSlaPolicyRejectsInvalidThresholds() {
+        assertDoesNotThrow(() -> DeploymentReconciliationService.validateSlaThresholds(300, 900));
+        assertDoesNotThrow(() -> DeploymentReconciliationService.validateSlaThresholds(60, 3600));
+        assertThrows(IllegalStateException.class, () -> DeploymentReconciliationService.validateSlaThresholds(0, 900));
+        assertThrows(IllegalStateException.class, () -> DeploymentReconciliationService.validateSlaThresholds(900, 300));
+        assertThrows(IllegalStateException.class, () -> DeploymentReconciliationService.validateSlaThresholds(300, 2_592_001));
+    }
+
+    @Test
     @TestTransaction
     void exhaustedReconciliationRetriesRequireManualIntervention() {
         UUID org = UUID.randomUUID(), env = UUID.randomUUID();

@@ -192,3 +192,15 @@ The Console exposes an age-based operational health view at:
 The endpoint classifies unresolved reconciliation records by time since their last state update: fresh (under five minutes), warning (five to under fifteen minutes), and critical (fifteen minutes or more). The response includes the explicit thresholds, counts for each band, an overall HEALTHY/WARNING/CRITICAL status, and the oldest unresolved deployment. Counts and details are restricted to the authenticated operator's organization/environment scope; empty scope returns a healthy zero-count response.
 
 This is a derived, read-only signal. It does not mutate reconciliation state, create another queue, dispatch retries, or claim that a runtime process has stopped. Age is based on the Console's persisted `updatedAt`, not a runtime-provided timestamp. Thresholds are fixed defaults in this milestone and can be made configurable through deployment policy in a later change.
+
+
+## M1.10.10 — configurable reconciliation SLA policy
+
+The age-band thresholds used by `GET /api/v1/console/deployments/reconciliation/health` are configuration-backed:
+
+- `wayang.console.reconciliation.sla.warning-seconds` (default `300`)
+- `wayang.console.reconciliation.sla.critical-seconds` (default `900`)
+
+They can be set through `WAYANG_CONSOLE_RECONCILIATION_SLA_WARNING_SECONDS` and `WAYANG_CONSOLE_RECONCILIATION_SLA_CRITICAL_SECONDS`. Startup validation requires a positive warning threshold, a critical threshold strictly greater than warning, and a critical threshold no greater than 30 days. Invalid configuration fails startup rather than silently producing misleading classifications.
+
+The health response reports the effective thresholds and `policyVersion=config-v1`. This is deployment-level configuration, not tenant-controlled input, so individual operators cannot weaken shared operational alerting. The endpoint remains read-only and organization/environment scoped.
