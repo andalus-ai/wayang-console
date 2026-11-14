@@ -163,3 +163,10 @@ An administrator can resolve an `SUPERSESSION_UNCONFIRMED` command only after in
 `POST /api/v1/console/deployments/{deploymentId}/commands/{commandId}/resolve-supersession`
 
 The request requires a reason and is appended to the audit chain. This is an explicit human assertion, not a remote cancellation signal. Until the command is runtime-confirmed or operator-resolved, retry dispatch remains blocked.
+
+
+## M1.10.8 — fleet reconciliation summary
+
+The read-only fleet summary is available at `GET /api/v1/console/deployments/reconciliation/summary`. It returns counts for `IN_SYNC`, `DRIFTED`, `WAITING_RUNTIME`, `RETRYING`, and `MANUAL_INTERVENTION`, plus any other states, due retry count, unresolved command supersession count, and the oldest unresolved deployment with its age. Counts are computed as scoped database aggregates; only the oldest unresolved row is hydrated for the age indicator.
+
+The endpoint derives organization and environment scope from the authenticated operator and accepts no tenant identifiers from the caller. An empty environment scope returns an all-zero summary. The endpoint is read-only: it does not dispatch commands, mutate reconciliation state, or infer that a runtime has stopped. The existing paginated reconciliation queue remains the drill-down surface for individual deployments.
