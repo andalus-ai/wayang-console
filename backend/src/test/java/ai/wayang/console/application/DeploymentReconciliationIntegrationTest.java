@@ -26,6 +26,16 @@ class DeploymentReconciliationIntegrationTest {
 
     @Test
     @TestTransaction
+    void slaAlertPolicyIsOptInByDefault() {
+        var policy = reconciliation.reconciliationSlaAlertPolicy();
+        assertFalse(policy.warningEnabled());
+        assertFalse(policy.criticalEnabled());
+        assertFalse(policy.recoveryEnabled());
+        assertEquals("POST_COMMIT_SPI_BEST_EFFORT", policy.deliveryMode());
+    }
+
+    @Test
+    @TestTransaction
     void acceptedObservationMovesDesiredPresentIntoSyncAndRejectsReplay() {
         UUID org = UUID.randomUUID(), env = UUID.randomUUID();
         var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));

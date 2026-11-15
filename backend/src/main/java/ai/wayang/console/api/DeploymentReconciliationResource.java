@@ -62,6 +62,13 @@ public class DeploymentReconciliationResource {
     }
 
     @GET
+    @Path("/reconciliation/sla/alert-policy")
+    public DeploymentReconciliationService.SlaAlertPolicy reconciliationSlaAlertPolicy() {
+        operator.requireRead();
+        return reconciliation.reconciliationSlaAlertPolicy();
+    }
+
+    @GET
     @Path("/reconciliation/sla/metrics")
     public DeploymentReconciliationService.ReconciliationSlaMetrics reconciliationSlaMetrics() {
         operator.requireRead();
