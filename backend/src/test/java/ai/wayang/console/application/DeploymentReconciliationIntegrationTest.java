@@ -23,6 +23,7 @@ class DeploymentReconciliationIntegrationTest {
     @Inject RuntimeInventoryService inventory;
     @Inject RuntimeCommandService commands;
     @Inject AuditIntegrityService audit;
+    @Inject ReconciliationSlaAlertDispatcher alertDispatcher;
 
     @Test
     @TestTransaction
@@ -32,6 +33,40 @@ class DeploymentReconciliationIntegrationTest {
         assertFalse(policy.criticalEnabled());
         assertFalse(policy.recoveryEnabled());
         assertEquals("POST_COMMIT_SPI_BEST_EFFORT", policy.deliveryMode());
+    }
+
+    @Test
+    @TestTransaction
+    void disabledSlaAlertPolicyDoesNotCreateDeliveryIntent() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "alert-disabled-" + UUID.randomUUID(),
+                "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "9".repeat(64);
+        var deployment = deployments.create(org, Set.of(env), runtime.id(),
+                "alert-disabled-" + UUID.randomUUID(), "alerts.flow", "1.0.0",
+                digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), deployment.id(), "PRESENT", "test-operator");
+        var row = DeploymentReconciliationEntity.<DeploymentReconciliationEntity>find(
+                "deploymentId", deployment.id()).firstResult();
+        Instant now = Instant.now();
+        row.updatedAt = now.minus(Duration.ofMinutes(10));
+        row.persist();
+
+        assertEquals(1, reconciliation.evaluateSlaTransitions(now));
+        assertEquals(0L, ai.wayang.console.adapter.persistence.AuditRecordEntity.count(
+                "organizationId = ?1 and environmentId = ?2 and action like ?3",
+                org, env, "RECONCILIATION_ALERT_%"));
+        assertEquals(1L, ai.wayang.console.adapter.persistence.AuditRecordEntity.count(
+                "organizationId = ?1 and environmentId = ?2 and action like ?3",
+                org, env, "RECONCILIATION_SLA_%_TO_WARNING"));
+    }
+
+    @Test
+    @TestTransaction
+    void alertDeliveryStatusIsEmptyWhenNoProviderIsInstalled() {
+        assertTrue(alertDispatcher.deliveryStatuses(UUID.randomUUID(), Set.of(UUID.randomUUID())).isEmpty());
     }
 
     @Test
