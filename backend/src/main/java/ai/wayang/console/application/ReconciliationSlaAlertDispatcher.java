@@ -64,10 +64,14 @@ public class ReconciliationSlaAlertDispatcher {
         for (ReconciliationSlaAlertSink sink : sinks) {
             try {
                 var status = sink.status(organizationId, Set.copyOf(environments));
+                String failureCode = status.lastFailureCode();
+                if (failureCode != null && !failureCode.matches("[A-Z0-9_.-]{1,80}"))
+                    failureCode = "PROVIDER_FAILURE";
+                String health = Set.of("HEALTHY", "DEGRADED", "UNAVAILABLE").contains(status.health())
+                        ? status.health() : "UNAVAILABLE";
                 result.add(new AlertSinkStatus(safeSinkId(sink), status.accepted(), status.pending(),
                         status.delivered(), status.failed(), status.oldestPendingAt(),
-                        status.lastDeliveredAt(), status.lastFailureAt(), status.lastFailureCode(),
-                        status.health()));
+                        status.lastDeliveredAt(), status.lastFailureAt(), failureCode, health));
             } catch (RuntimeException failure) {
                 LOG.errorf(failure, "SLA alert sink %s status query failed", safeSinkId(sink));
                 result.add(new AlertSinkStatus(safeSinkId(sink), 0, 0, 0, 0,
@@ -78,7 +82,11 @@ public class ReconciliationSlaAlertDispatcher {
     }
 
     private static String safeSinkId(ReconciliationSlaAlertSink sink) {
-        String id = sink.sinkId();
-        return id != null && id.matches("[a-zA-Z0-9._-]{1,80}") ? id : "invalid-sink-id";
+        try {
+            String id = sink.sinkId();
+            return id != null && id.matches("[a-zA-Z0-9._-]{1,80}") ? id : "invalid-sink-id";
+        } catch (RuntimeException failure) {
+            return "invalid-sink-id";
+        }
     }
 }
