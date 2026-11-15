@@ -24,6 +24,7 @@ class DeploymentReconciliationIntegrationTest {
     @Inject RuntimeCommandService commands;
     @Inject AuditIntegrityService audit;
     @Inject ReconciliationSlaAlertDispatcher alertDispatcher;
+    @Inject TestReconciliationSlaAlertSink testAlertSink;
 
     @Test
     @TestTransaction
@@ -65,8 +66,19 @@ class DeploymentReconciliationIntegrationTest {
 
     @Test
     @TestTransaction
-    void alertDeliveryStatusIsEmptyWhenNoProviderIsInstalled() {
-        assertTrue(alertDispatcher.deliveryStatuses(UUID.randomUUID(), Set.of(UUID.randomUUID())).isEmpty());
+    void alertIntentReplaysInOrderAndProviderCursorMakesReplayIdempotent() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID(), deploymentId = UUID.randomUUID();
+        var alert = audit.append(org, env, "console:test", "RECONCILIATION_ALERT_WARNING_TO_CRITICAL",
+                "DEPLOYMENT", deploymentId.toString(), Instant.now(), "SUCCESS");
+
+        assertEquals(1, alertDispatcher.replayPendingTransitions());
+        assertEquals(0, alertDispatcher.replayPendingTransitions());
+        assertEquals(alert.sequenceNo.longValue(), testAlertSink.lastAcceptedSequence(org, env));
+        var status = testAlertSink.status(org, Set.of(env));
+        assertEquals(1L, status.accepted());
+        assertEquals(1L, status.delivered());
+        assertEquals(0L, status.pending());
+        assertEquals("HEALTHY", status.health());
     }
 
     @Test
