@@ -32,7 +32,7 @@ class DeploymentReconciliationIntegrationTest {
         assertFalse(policy.warningEnabled());
         assertFalse(policy.criticalEnabled());
         assertFalse(policy.recoveryEnabled());
-        assertEquals("POST_COMMIT_SPI_BEST_EFFORT", policy.deliveryMode());
+        assertEquals("AUDIT_REPLAY_WITH_PROVIDER_OWNED_DURABLE_DELIVERY", policy.deliveryMode());
     }
 
     @Test
