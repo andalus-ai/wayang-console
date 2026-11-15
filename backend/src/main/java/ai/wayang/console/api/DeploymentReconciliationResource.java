@@ -2,6 +2,7 @@ package ai.wayang.console.api;
 
 import ai.wayang.console.application.DeploymentReconciliationService;
 import ai.wayang.console.application.RuntimeCommandService;
+import ai.wayang.console.application.ReconciliationSlaAlertDispatcher;
 import ai.wayang.console.security.ConsoleOperatorContext;
 import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
@@ -20,6 +21,7 @@ public class DeploymentReconciliationResource {
     @Inject ConsoleOperatorContext operator;
     @Inject DeploymentReconciliationService reconciliation;
     @Inject RuntimeCommandService commands;
+    @Inject ReconciliationSlaAlertDispatcher alertDispatcher;
 
     public record DesiredStateRequest(String desiredState) {}
 
@@ -66,6 +68,13 @@ public class DeploymentReconciliationResource {
     public DeploymentReconciliationService.SlaAlertPolicy reconciliationSlaAlertPolicy() {
         operator.requireRead();
         return reconciliation.reconciliationSlaAlertPolicy();
+    }
+
+    @GET
+    @Path("/reconciliation/sla/delivery")
+    public java.util.List<ReconciliationSlaAlertDispatcher.AlertSinkStatus> reconciliationSlaAlertDelivery() {
+        operator.requireRead();
+        return alertDispatcher.deliveryStatuses(operator.organizationId(), operator.environmentIds());
     }
 
     @GET

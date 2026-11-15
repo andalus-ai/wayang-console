@@ -245,6 +245,28 @@ All default to `false`; equivalent environment variables are documented in `appl
 
 `GET /api/v1/console/deployments/reconciliation/sla/alert-policy`
 
-Extensions provide `ReconciliationSlaAlertSink` CDI beans. The Console emits a tenant/environment/deployment-scoped immutable transition signal through a CDI transactional event observer after the audit and reconciliation transaction commits. The core has no dependency on email, Slack, or webhook vendors. Signals are emitted only for actual persisted status transitions, so repeated worker passes do not duplicate alerts.
+Extensions provide `ReconciliationSlaAlertSink` CDI beans. The core has no dependency on email, Slack, or webhook vendors. Alert intents are written only for actual persisted SLA transitions whose corresponding alert category is enabled. Delivery is delegated to provider extensions; the audit-backed replay and provider acceptance contract is defined in M1.10.14. No notification destination or secret is accepted from operator request payloads.
 
-**Delivery contract:** the core SPI is post-commit and best-effort; it is not a durable notification queue and does not claim retry or exactly-once delivery. A provider that requires durable delivery must hand off to an existing platform delivery facility or own its provider-specific delivery lifecycle outside the reconciliation transaction. Provider exceptions are isolated and logged; they cannot roll back reconciliation or block Runtime. No notification destination or secret is accepted from operator request payloads.
+
+## M1.10.14 — durable SLA alert delivery contract
+
+Enabled WARNING, CRITICAL, and recovery transitions now append a separate `RECONCILIATION_ALERT_<FROM>_TO_<TO>` intent record to the same per-organization/environment tamper-evident audit chain and in the same transaction as the SLA state transition. Disabled alert categories do not create delivery intents. This is an audit-backed replay source, not a second outbox or queue.
+
+The existing scheduled reconciliation worker replays committed alert intents in sequence order. Each `ReconciliationSlaAlertSink` implementation must:
+
+- expose a stable `sinkId()`;
+- persist and return its per-organization/environment `lastAcceptedSequence`;
+- make `accept(transition, expectedLastAcceptedSequence)` idempotent on organization, environment, audit sequence, and record hash;
+- atomically compare-and-set its cursor, persist the accepted event, and advance the cursor; concurrent Console workers must not be able to skip or reorder events;
+- own its durable provider delivery lifecycle, retry/backoff, cooldown, and terminal failure state;
+- expose aggregate delivery status for the requested organization/environment scope.
+
+The core invokes providers outside a database transaction. A failed acceptance does not advance the provider cursor, so the next worker pass retries the same audit record. Provider acceptance is deliberately separate from final delivery: the provider's own durable store must track pending, delivered, and failed outcomes. The core does not claim that an accepted event has reached an external destination.
+
+Operators can inspect provider status at:
+
+`GET /api/v1/console/deployments/reconciliation/sla/delivery`
+
+The endpoint requires read authorization and passes only the authenticated organization/environment scope to each provider. It returns aggregate counts and bounded failure metadata, never destinations, credentials, or secret material. A provider status exception is represented as `UNAVAILABLE` and does not affect reconciliation.
+
+No new database table, command queue, or generic outbox is introduced. Runtime execution and reconciliation do not wait for external notification delivery.

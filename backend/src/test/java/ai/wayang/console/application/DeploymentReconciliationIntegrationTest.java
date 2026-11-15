@@ -23,6 +23,8 @@ class DeploymentReconciliationIntegrationTest {
     @Inject RuntimeInventoryService inventory;
     @Inject RuntimeCommandService commands;
     @Inject AuditIntegrityService audit;
+    @Inject ReconciliationSlaAlertDispatcher alertDispatcher;
+    @Inject TestReconciliationSlaAlertSink testAlertSink;
 
     @Test
     @TestTransaction
@@ -31,7 +33,52 @@ class DeploymentReconciliationIntegrationTest {
         assertFalse(policy.warningEnabled());
         assertFalse(policy.criticalEnabled());
         assertFalse(policy.recoveryEnabled());
-        assertEquals("POST_COMMIT_SPI_BEST_EFFORT", policy.deliveryMode());
+        assertEquals("AUDIT_REPLAY_WITH_PROVIDER_OWNED_DURABLE_DELIVERY", policy.deliveryMode());
+    }
+
+    @Test
+    @TestTransaction
+    void disabledSlaAlertPolicyDoesNotCreateDeliveryIntent() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "alert-disabled-" + UUID.randomUUID(),
+                "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "9".repeat(64);
+        var deployment = deployments.create(org, Set.of(env), runtime.id(),
+                "alert-disabled-" + UUID.randomUUID(), "alerts.flow", "1.0.0",
+                digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), deployment.id(), "PRESENT", "test-operator");
+        var row = DeploymentReconciliationEntity.<DeploymentReconciliationEntity>find(
+                "deploymentId", deployment.id()).firstResult();
+        Instant now = Instant.now();
+        row.updatedAt = now.minus(Duration.ofMinutes(10));
+        row.persist();
+
+        assertEquals(1, reconciliation.evaluateSlaTransitions(now));
+        assertEquals(0L, ai.wayang.console.adapter.persistence.AuditRecordEntity.count(
+                "organizationId = ?1 and environmentId = ?2 and action like ?3",
+                org, env, "RECONCILIATION_ALERT_%"));
+        assertEquals(1L, ai.wayang.console.adapter.persistence.AuditRecordEntity.count(
+                "organizationId = ?1 and environmentId = ?2 and action like ?3",
+                org, env, "RECONCILIATION_SLA_%_TO_WARNING"));
+    }
+
+    @Test
+    @TestTransaction
+    void alertIntentReplaysInOrderAndProviderCursorMakesReplayIdempotent() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID(), deploymentId = UUID.randomUUID();
+        var alert = audit.append(org, env, "console:test", "RECONCILIATION_ALERT_WARNING_TO_CRITICAL",
+                "DEPLOYMENT", deploymentId.toString(), Instant.now(), "SUCCESS");
+
+        assertEquals(1, alertDispatcher.replayPendingTransitions());
+        assertEquals(0, alertDispatcher.replayPendingTransitions());
+        assertEquals(alert.sequenceNo.longValue(), testAlertSink.lastAcceptedSequence(org, env));
+        var status = testAlertSink.status(org, Set.of(env));
+        assertEquals(1L, status.accepted());
+        assertEquals(1L, status.delivered());
+        assertEquals(0L, status.pending());
+        assertEquals("HEALTHY", status.health());
     }
 
     @Test
