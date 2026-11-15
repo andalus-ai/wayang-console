@@ -67,8 +67,8 @@ public class ReconciliationSlaAlertDispatcher {
                 String failureCode = status.lastFailureCode();
                 if (failureCode != null && !failureCode.matches("[A-Z0-9_.-]{1,80}"))
                     failureCode = "PROVIDER_FAILURE";
-                String health = Set.of("HEALTHY", "DEGRADED", "UNAVAILABLE").contains(status.health())
-                        ? status.health() : "UNAVAILABLE";
+                String health = "HEALTHY".equals(status.health()) || "DEGRADED".equals(status.health())
+                        || "UNAVAILABLE".equals(status.health()) ? status.health() : "UNAVAILABLE";
                 result.add(new AlertSinkStatus(safeSinkId(sink), status.accepted(), status.pending(),
                         status.delivered(), status.failed(), status.oldestPendingAt(),
                         status.lastDeliveredAt(), status.lastFailureAt(), failureCode, health));
