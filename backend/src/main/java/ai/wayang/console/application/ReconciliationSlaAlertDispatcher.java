@@ -39,7 +39,7 @@ public class ReconciliationSlaAlertDispatcher {
                             reader.after(scope.organizationId(), scope.environmentId(), cursor, BATCH_SIZE);
                     for (var transition : batch) {
                         try {
-                            sink.accept(transition);
+                            sink.accept(transition, cursor);
                             cursor = transition.auditSequence();
                             accepted++;
                         } catch (RuntimeException failure) {
