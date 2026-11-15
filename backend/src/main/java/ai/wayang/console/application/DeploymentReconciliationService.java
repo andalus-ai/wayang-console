@@ -79,9 +79,6 @@ public class DeploymentReconciliationService {
     public record SlaAlertTransition(UUID organizationId, UUID environmentId, UUID deploymentId,
             String fromStatus, String toStatus, Instant occurredAt, String actor,
             long auditSequence, String recordHash) {}
-    public record AlertSinkStatus(String sinkId, long accepted, long pending, long delivered, long failed,
-            Instant oldestPendingAt, Instant lastDeliveredAt, Instant lastFailureAt,
-            String lastFailureCode, String health) {}
     public record ReconciliationSlaMetrics(long unresolved, long fresh, long warning, long critical,
             long transitionsToHealthy, long transitionsToWarning, long transitionsToCritical,
             long warningThresholdSeconds, long criticalThresholdSeconds, String policyVersion, Instant generatedAt) {}
