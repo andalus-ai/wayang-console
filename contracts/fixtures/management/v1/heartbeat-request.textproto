@@ -1,0 +1,7 @@
+instance_id: "runtime-fixture-001"
+registration_id: "registration-fixture-001"
+health: "HEALTHY"
+observed_at {
+  seconds: 1794675300
+  nanos: 123000000
+}

@@ -1,0 +1,10 @@
+commands {
+  command_id: "command-fixture-001"
+  idempotency_key: "deployment:deployment-fixture-001:generation:4"
+  command_type: "DEPLOY"
+  typed_payload: "{\"deploymentId\":\"deployment-fixture-001\",\"generation\":4}"
+  expires_at {
+    seconds: 1794675900
+    nanos: 0
+  }
+}

@@ -1,0 +1,5 @@
+instance_id: "runtime-fixture-001"
+registration_id: "registration-fixture-001"
+command_id: "command-fixture-001"
+status: "SUCCEEDED"
+message: "deployment applied"

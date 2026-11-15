@@ -1,0 +1,7 @@
+registration_id: "registration-fixture-001"
+lease_expires_at {
+  seconds: 1794675600
+  nanos: 0
+}
+heartbeat_interval_seconds: 30
+negotiated_protocol_version: "1.0"

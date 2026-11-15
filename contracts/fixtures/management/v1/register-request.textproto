@@ -1,0 +1,10 @@
+identity {
+  instance_id: "runtime-fixture-001"
+  runtime_version: "1.2.3"
+  deployment_id: "deployment-fixture-001"
+  environment_id: "environment-fixture-001"
+}
+hostname: "worker-01.example.invalid"
+platform: "linux-amd64"
+supported_protocol_versions: "1.0"
+supported_protocol_versions: "1.1"
