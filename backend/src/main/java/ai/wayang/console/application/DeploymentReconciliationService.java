@@ -27,6 +27,12 @@ public class DeploymentReconciliationService {
     private static final Duration OBSERVATION_TIMEOUT = Duration.ofMinutes(2);
     private static final int MAX_RETRIES = 5;
     @Inject AuditIntegrityService audit;
+    @ConfigProperty(name = "wayang.console.reconciliation.sla.alerts.warning.enabled", defaultValue = "false")
+    boolean warningAlertsEnabled;
+    @ConfigProperty(name = "wayang.console.reconciliation.sla.alerts.critical.enabled", defaultValue = "false")
+    boolean criticalAlertsEnabled;
+    @ConfigProperty(name = "wayang.console.reconciliation.sla.alerts.recovery.enabled", defaultValue = "false")
+    boolean recoveryAlertsEnabled;
     @ConfigProperty(name = "wayang.console.reconciliation.sla.warning-seconds", defaultValue = "300")
     long warningSlaSeconds;
     @ConfigProperty(name = "wayang.console.reconciliation.sla.critical-seconds", defaultValue = "900")
@@ -69,6 +75,13 @@ public class DeploymentReconciliationService {
     public record AuditTimelinePage(List<AuditEventView> items, long total, int page, int size) {}
     public record SlaTransitionView(long sequence, UUID deploymentId, Instant occurredAt, String actor, String fromStatus, String toStatus, String recordHash) {}
     public record SlaTransitionPage(List<SlaTransitionView> items, long total, int page, int size) {}
+    public record SlaAlertPolicy(boolean warningEnabled, boolean criticalEnabled, boolean recoveryEnabled, String deliveryMode) {}
+    public record SlaAlertTransition(UUID organizationId, UUID environmentId, UUID deploymentId,
+            String fromStatus, String toStatus, Instant occurredAt, String actor,
+            long auditSequence, String recordHash) {}
+    public record ReconciliationSlaMetrics(long unresolved, long fresh, long warning, long critical,
+            long transitionsToHealthy, long transitionsToWarning, long transitionsToCritical,
+            long warningThresholdSeconds, long criticalThresholdSeconds, String policyVersion, Instant generatedAt) {}
 
     @Transactional
     public ReconciliationView setDesired(UUID organizationId, Set<UUID> environments,
@@ -357,6 +370,30 @@ public class DeploymentReconciliationService {
                 warningSeconds, criticalSeconds, "config-v1", oldestView, now);
     }
 
+    /**
+     * Aggregate current SLA gauges and append-only transition counters for the authenticated
+     * organization/environment scope. Metric dimensions are intentionally not emitted as labels.
+     */
+    @Transactional
+    public ReconciliationSlaMetrics reconciliationSlaMetrics(UUID organizationId, Set<UUID> environments, Instant now) {
+        if (environments == null || environments.isEmpty()) {
+            return new ReconciliationSlaMetrics(0, 0, 0, 0, 0, 0, 0,
+                    warningSlaSeconds, criticalSlaSeconds, "config-v1", now);
+        }
+        ReconciliationHealth health = reconciliationHealth(organizationId, environments, now);
+        String scope = "organizationId = ?1 and environmentId in ?2 and resourceType = 'DEPLOYMENT' and action like ?3";
+        long toHealthy = AuditRecordEntity.count(scope, organizationId, environments, "RECONCILIATION_SLA_%_TO_HEALTHY");
+        long toWarning = AuditRecordEntity.count(scope, organizationId, environments, "RECONCILIATION_SLA_%_TO_WARNING");
+        long toCritical = AuditRecordEntity.count(scope, organizationId, environments, "RECONCILIATION_SLA_%_TO_CRITICAL");
+        return new ReconciliationSlaMetrics(health.unresolved(), health.fresh(), health.warning(), health.critical(),
+                toHealthy, toWarning, toCritical, warningSlaSeconds, criticalSlaSeconds, "config-v1", now);
+    }
+
+    public SlaAlertPolicy reconciliationSlaAlertPolicy() {
+        return new SlaAlertPolicy(warningAlertsEnabled, criticalAlertsEnabled, recoveryAlertsEnabled,
+                "AUDIT_REPLAY_WITH_PROVIDER_OWNED_DURABLE_DELIVERY");
+    }
+
     /** Persist only real SLA transitions; candidate discovery is bounded and lock-free. */
     @Transactional
     public int evaluateSlaTransitions(Instant now) {
@@ -394,6 +431,20 @@ public class DeploymentReconciliationService {
                     "console:reconciliation-sla-worker",
                     "RECONCILIATION_SLA_" + previousStatus + "_TO_" + nextStatus,
                     "DEPLOYMENT", deployment.id.toString(), now, "SUCCESS");
+            boolean notify = ("WARNING".equals(nextStatus) && warningAlertsEnabled)
+                    || ("CRITICAL".equals(nextStatus) && criticalAlertsEnabled)
+                    || ("HEALTHY".equals(nextStatus)
+                        && ("WARNING".equals(previousStatus) || "CRITICAL".equals(previousStatus))
+                        && recoveryAlertsEnabled);
+            if (notify) {
+                // Persist alert intent in the same tamper-evident chain and transaction.
+                // The delivery worker replays these records after restarts; providers own
+                // their durable acceptance, retry, and idempotency state.
+                audit.append(deployment.organizationId, deployment.environmentId,
+                        "console:reconciliation-sla-worker",
+                        "RECONCILIATION_ALERT_" + previousStatus + "_TO_" + nextStatus,
+                        "DEPLOYMENT", deployment.id.toString(), now, "SUCCESS");
+            }
             transitions++;
         }
         return transitions;

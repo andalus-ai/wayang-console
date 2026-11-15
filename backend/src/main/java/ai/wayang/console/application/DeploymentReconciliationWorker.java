@@ -13,6 +13,7 @@ import java.time.Instant;
 public class DeploymentReconciliationWorker {
     @Inject DeploymentReconciliationService reconciliation;
     @Inject RuntimeCommandService commands;
+    @Inject ReconciliationSlaAlertDispatcher alertDispatcher;
 
     @Scheduled(every = "30s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void recoverTimedOutDeployments() {
@@ -20,6 +21,7 @@ public class DeploymentReconciliationWorker {
         reconciliation.reconcileExpiredObservations(now);
         reconciliation.scheduleTimedOutRetries(now);
         reconciliation.evaluateSlaTransitions(now);
+        alertDispatcher.replayPendingTransitions();
         for (var deploymentId : reconciliation.dueRetryDeploymentIds(now)) {
             commands.dispatchDueRetry(deploymentId, now);
         }
