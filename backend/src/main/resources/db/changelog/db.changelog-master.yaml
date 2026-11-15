@@ -577,3 +577,25 @@ databaseChangeLog:
         - dropColumn: { tableName: wc_management_command, columnName: superseded_at }
         - dropColumn: { tableName: wc_management_command, columnName: superseded_by_generation }
         - dropColumn: { tableName: wc_management_command, columnName: generation }
+
+  - changeSet:
+      id: 017-reconciliation-sla-transition-state
+      author: andalus-ai
+      changes:
+        - addColumn:
+            tableName: wc_deployment_reconciliation
+            columns:
+              - column: { name: sla_status, type: VARCHAR(16) }
+              - column: { name: sla_evaluated_at, type: TIMESTAMP WITH TIME ZONE }
+        - createIndex:
+            tableName: wc_deployment_reconciliation
+            indexName: idx_wc_reconciliation_sla_status
+            columns:
+              - column: { name: sla_status }
+              - column: { name: updated_at }
+      rollback:
+        - dropIndex:
+            tableName: wc_deployment_reconciliation
+            indexName: idx_wc_reconciliation_sla_status
+        - dropColumn: { tableName: wc_deployment_reconciliation, columnName: sla_evaluated_at }
+        - dropColumn: { tableName: wc_deployment_reconciliation, columnName: sla_status }

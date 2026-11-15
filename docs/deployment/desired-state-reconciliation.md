@@ -173,3 +173,100 @@ The observation read model exposes a derived observationFresh flag based on the 
 The worker processes a bounded batch and locks each deployment before its reconciliation row. It changes state only after rechecking the desired state, current reconciliation state, and receipt timestamp under lock. Repeated worker runs therefore do not emit duplicate expiry events or repeatedly reset the retry schedule. The existing timeout/backoff worker subsequently handles WAITING_RUNTIME; no second command queue or outbox is introduced.
 
 This milestone is observational and non-destructive. It does not stop workloads for ABSENT, auto-apply rollback, or infer that an unreachable runtime has terminated. Existing generation fencing, command supersession, bounded retries, and operator escalation remain authoritative.
+
+
+## M1.10.8 — fleet reconciliation summary
+
+The operator-facing fleet summary is available at:
+
+`GET /api/v1/console/deployments/reconciliation/summary`
+
+It aggregates reconciliation states, due retries, unresolved command supersessions, and the oldest unresolved deployment for the authenticated organization/environment scope. It is read-only and does not dispatch commands or mutate deployment state. The existing paginated queue remains the drill-down surface.
+
+## M1.10.9 — age-based reconciliation health
+
+The Console exposes an age-based operational health view at:
+
+`GET /api/v1/console/deployments/reconciliation/health`
+
+The endpoint classifies unresolved reconciliation records by time since their last state update: fresh (under five minutes), warning (five to under fifteen minutes), and critical (fifteen minutes or more). The response includes the explicit thresholds, counts for each band, an overall HEALTHY/WARNING/CRITICAL status, and the oldest unresolved deployment. Counts and details are restricted to the authenticated operator's organization/environment scope; empty scope returns a healthy zero-count response.
+
+This is a derived, read-only signal. It does not mutate reconciliation state, create another queue, dispatch retries, or claim that a runtime process has stopped. Age is based on the Console's persisted `updatedAt`, not a runtime-provided timestamp. Thresholds are fixed defaults in this milestone and can be made configurable through deployment policy in a later change.
+
+
+## M1.10.10 — configurable reconciliation SLA policy
+
+The age-band thresholds used by `GET /api/v1/console/deployments/reconciliation/health` are configuration-backed:
+
+- `wayang.console.reconciliation.sla.warning-seconds` (default `300`)
+- `wayang.console.reconciliation.sla.critical-seconds` (default `900`)
+
+They can be set through `WAYANG_CONSOLE_RECONCILIATION_SLA_WARNING_SECONDS` and `WAYANG_CONSOLE_RECONCILIATION_SLA_CRITICAL_SECONDS`. Startup validation requires a positive warning threshold, a critical threshold strictly greater than warning, and a critical threshold no greater than 30 days. Invalid configuration fails startup rather than silently producing misleading classifications.
+
+The health response reports the effective thresholds and `policyVersion=config-v1`. This is deployment-level configuration, not tenant-controlled input, so individual operators cannot weaken shared operational alerting. The endpoint remains read-only and organization/environment scoped.
+
+
+## M1.10.11 — durable reconciliation SLA transitions
+
+The scheduled reconciliation worker evaluates SLA transitions after observation expiry and retry scheduling. Each reconciliation row stores its last evaluated SLA status (HEALTHY, WARNING, or CRITICAL) and evaluation time. A transition is persisted only when the status changes; repeated worker evaluations do not emit duplicate audit records.
+
+The transition is appended to the existing per-organization/environment tamper-evident audit chain as a RECONCILIATION_SLA_<FROM>_TO_<TO> action. The first evaluation uses UNINITIALIZED as the source status. Returning to HEALTHY is recorded when an unresolved deployment falls below the warning threshold or when reconciliation reaches IN_SYNC.
+
+Operators can inspect the newest transitions through:
+
+GET /api/v1/console/deployments/reconciliation/sla/history?page=0&size=25
+
+The endpoint derives organization/environment scope from the authenticated operator, is read-only, and returns paginated transitions from the existing audit chain. No new event queue or independent history store is introduced. Evaluation is bounded to 100 candidates per worker pass and rechecks each candidate while holding locks in deployment -> reconciliation order.
+
+
+## M1.10.12 — scoped SLA metrics and Prometheus exposition
+
+The Console exposes aggregate SLA metrics for the authenticated operator's organization and permitted environments:
+
+- JSON: `GET /api/v1/console/deployments/reconciliation/sla/metrics`
+- Prometheus text format: `GET /api/v1/console/deployments/reconciliation/sla/metrics/prometheus`
+
+The exposition includes unresolved, fresh, warning, and critical gauges; configured warning and critical thresholds; and append-only transition counters by destination state. The endpoint is protected by the same authenticated operator access check as the reconciliation health and history endpoints. A Prometheus scraper must use a dedicated read-authorized operator identity and bearer token.
+
+Metrics are aggregated across the caller's permitted environments. No organization, environment, deployment, runtime, workflow, or user identifiers are emitted as labels; only the fixed destination-state and policy-version labels are used. This avoids tenant disclosure and unbounded label cardinality. Empty environment scope returns zero-valued metrics. The endpoint is read-only and does not trigger SLA evaluation, append audit records, dispatch commands, or mutate reconciliation state.
+
+The transition counters are derived from the existing append-only audit chain, not from a second metrics event store. Current-state gauges use the same Console timestamps and configurable SLA thresholds as the reconciliation health endpoint.
+
+
+## M1.10.13 — SLA alert policy and notification SPI
+
+SLA transitions can publish opt-in alert signals after the transaction commits. The policy is configured independently for warning, critical, and recovery transitions:
+
+- `wayang.console.reconciliation.sla.alerts.warning.enabled`
+- `wayang.console.reconciliation.sla.alerts.critical.enabled`
+- `wayang.console.reconciliation.sla.alerts.recovery.enabled`
+
+All default to `false`; equivalent environment variables are documented in `application.properties`. The authenticated operator can inspect the effective policy at:
+
+`GET /api/v1/console/deployments/reconciliation/sla/alert-policy`
+
+Extensions provide `ReconciliationSlaAlertSink` CDI beans. The core has no dependency on email, Slack, or webhook vendors. Alert intents are written only for actual persisted SLA transitions whose corresponding alert category is enabled. Delivery is delegated to provider extensions; the audit-backed replay and provider acceptance contract is defined in M1.10.14. No notification destination or secret is accepted from operator request payloads.
+
+
+## M1.10.14 — durable SLA alert delivery contract
+
+Enabled WARNING, CRITICAL, and recovery transitions now append a separate `RECONCILIATION_ALERT_<FROM>_TO_<TO>` intent record to the same per-organization/environment tamper-evident audit chain and in the same transaction as the SLA state transition. Disabled alert categories do not create delivery intents. This is an audit-backed replay source, not a second outbox or queue.
+
+The existing scheduled reconciliation worker replays committed alert intents in sequence order. Each `ReconciliationSlaAlertSink` implementation must:
+
+- expose a stable `sinkId()`;
+- persist and return its per-organization/environment `lastAcceptedSequence`;
+- make `accept(transition, expectedLastAcceptedSequence)` idempotent on organization, environment, audit sequence, and record hash;
+- atomically compare-and-set its cursor, persist the accepted event, and advance the cursor; concurrent Console workers must not be able to skip or reorder events;
+- own its durable provider delivery lifecycle, retry/backoff, cooldown, and terminal failure state;
+- expose aggregate delivery status for the requested organization/environment scope.
+
+The core invokes providers outside a database transaction. A failed acceptance does not advance the provider cursor, so the next worker pass retries the same audit record. Provider acceptance is deliberately separate from final delivery: the provider's own durable store must track pending, delivered, and failed outcomes. The core does not claim that an accepted event has reached an external destination.
+
+Operators can inspect provider status at:
+
+`GET /api/v1/console/deployments/reconciliation/sla/delivery`
+
+The endpoint requires read authorization and passes only the authenticated organization/environment scope to each provider. It returns aggregate counts and bounded failure metadata, never destinations, credentials, or secret material. A provider status exception is represented as `UNAVAILABLE` and does not affect reconciliation.
+
+No new database table, command queue, or generic outbox is introduced. Runtime execution and reconciliation do not wait for external notification delivery.
