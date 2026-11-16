@@ -58,6 +58,7 @@ public final class ReconciliationSlaWebhookSupport {
         java.nio.ByteBuffer encoded = StandardCharsets.UTF_8.encode(java.nio.CharBuffer.wrap(secret));
         byte[] key = new byte[encoded.remaining()];
         encoded.get(key);
+        if (encoded.hasArray()) java.util.Arrays.fill(encoded.array(), (byte) 0);
         byte[] prefix = (timestampEpochSeconds + ".").getBytes(StandardCharsets.UTF_8);
         byte[] signed = new byte[prefix.length + body.length];
         System.arraycopy(prefix, 0, signed, 0, prefix.length);
