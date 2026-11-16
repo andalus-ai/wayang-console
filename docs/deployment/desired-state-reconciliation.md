@@ -287,7 +287,7 @@ Configuration:
 - `wayang.console.reconciliation.sla.webhook.allowed-hosts` / `WAYANG_CONSOLE_SLA_WEBHOOK_ALLOWED_HOSTS`: exact comma-separated DNS host allowlist; empty by default.
 - `wayang.console.reconciliation.sla.webhook.timeout-seconds` / `WAYANG_CONSOLE_SLA_WEBHOOK_TIMEOUT_SECONDS`: request timeout, 1–30 seconds; defaults to 5.
 
-**Deployment requirement:** this repository currently has no built-in Vault/cloud-secret-manager adapter or hardened outbound egress transport. The client therefore fails closed unless exactly one implementation of each SPI is installed. This milestone does not store webhook secrets, provide a default unrestricted HTTP client, or claim that an external notification has been delivered. A production sink must still implement the M1.10.14 durable acceptance cursor and provider-owned delivery lifecycle. No new core queue or notification table is added.
+**M1.10.15 boundary (superseded by M1.10.16):** this milestone intentionally introduced only the extension SPIs and did not ship a default unrestricted HTTP client or plaintext secret storage. The concrete secret resolver, restricted HTTPS transport, and provider-owned durable lifecycle are implemented in M1.10.16 below.
 
 
 ## M1.10.16 — durable HTTPS webhook provider
