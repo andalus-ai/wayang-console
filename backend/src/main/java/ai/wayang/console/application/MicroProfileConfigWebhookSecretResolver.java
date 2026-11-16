@@ -18,6 +18,17 @@ public class MicroProfileConfigWebhookSecretResolver implements ReconciliationSl
         if (secretReference == null || !secretReference.matches("[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}")) {
             throw new IllegalArgumentException("Invalid webhook secret reference");
         }
+        if (secretReference.startsWith("env:")) {
+            String variable = secretReference.substring(4);
+            if (!variable.matches("[A-Z][A-Z0-9_]{0,126}")) {
+                throw new IllegalArgumentException("Invalid webhook environment secret reference");
+            }
+            String value = System.getenv(variable);
+            if (value == null || value.isBlank()) {
+                throw new IllegalStateException("Webhook secret reference is unavailable");
+            }
+            return value.toCharArray();
+        }
         Config config = ConfigProvider.getConfig();
         return config.getOptionalValue(secretReference, String.class)
                 .filter(value -> !value.isBlank())
