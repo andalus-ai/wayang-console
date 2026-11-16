@@ -28,7 +28,7 @@ public class ReconciliationSlaWebhookClient {
     @Inject Instance<ReconciliationSlaWebhookTransport> transports;
 
     @ConfigProperty(name = "wayang.console.reconciliation.sla.webhook.allowed-hosts", defaultValue = "")
-    Set<String> allowedHosts;
+    String allowedHostsConfig;
 
     @ConfigProperty(name = "wayang.console.reconciliation.sla.webhook.timeout-seconds", defaultValue = "5")
     long timeoutSeconds;
@@ -36,7 +36,7 @@ public class ReconciliationSlaWebhookClient {
     public ReconciliationSlaWebhookTransport.Response deliver(
             URI endpoint, String secretReference,
             DeploymentReconciliationService.SlaAlertTransition transition) {
-        URI safeEndpoint = ReconciliationSlaWebhookSupport.validateEndpoint(endpoint, allowedHosts);
+        URI safeEndpoint = ReconciliationSlaWebhookSupport.validateEndpoint(endpoint, allowedHosts());
         if (secretReference == null || !secretReference.matches("[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}")) {
             throw new IllegalArgumentException("A valid external webhook secret reference is required");
         }
@@ -66,6 +66,12 @@ public class ReconciliationSlaWebhookClient {
             if (secret != null) java.util.Arrays.fill(secret, '\0');
             java.util.Arrays.fill(body, (byte) 0);
         }
+    }
+
+    private Set<String> allowedHosts() {
+        return java.util.Arrays.stream(allowedHostsConfig.split(","))
+                .map(String::trim).filter(value -> !value.isEmpty())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     private byte[] serialize(DeploymentReconciliationService.SlaAlertTransition transition) {
