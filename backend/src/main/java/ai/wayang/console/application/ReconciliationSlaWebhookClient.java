@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
-import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.config.ConfigProvider;
 
 import java.net.URI;
 import java.time.Duration;
@@ -26,9 +26,6 @@ public class ReconciliationSlaWebhookClient {
     @Inject ObjectMapper objectMapper;
     @Inject Instance<ReconciliationSlaWebhookSecretResolver> secretResolvers;
     @Inject Instance<ReconciliationSlaWebhookTransport> transports;
-
-    @ConfigProperty(name = "wayang.console.reconciliation.sla.webhook.allowed-hosts", defaultValue = "")
-    String allowedHostsConfig;
 
     @ConfigProperty(name = "wayang.console.reconciliation.sla.webhook.timeout-seconds", defaultValue = "5")
     long timeoutSeconds;
@@ -69,7 +66,10 @@ public class ReconciliationSlaWebhookClient {
     }
 
     private Set<String> allowedHosts() {
-        return java.util.Arrays.stream(allowedHostsConfig.split(","))
+        String configured = ConfigProvider.getConfig()
+                .getOptionalValue("wayang.console.reconciliation.sla.webhook.allowed-hosts", String.class)
+                .orElse("");
+        return java.util.Arrays.stream(configured.split(","))
                 .map(String::trim).filter(value -> !value.isEmpty())
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
