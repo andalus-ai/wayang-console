@@ -260,6 +260,14 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
         } catch (IllegalArgumentException invalid) {
             throw new IllegalStateException("Webhook destination is invalid", invalid);
         }
+        String allowed = config.getOptionalValue(
+                "wayang.console.reconciliation.sla.webhook.allowed-hosts", String.class).orElse("");
+        Set<String> allowedHosts = java.util.Arrays.stream(allowed.split(","))
+                .map(String::trim).filter(value -> !value.isEmpty()).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        ReconciliationSlaWebhookSupport.validateEndpoint(uri, allowedHosts);
+        if (!secretReference.matches("[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}")) {
+            throw new IllegalStateException("Webhook secret reference is invalid");
+        }
         return new Destination(uri, secretReference);
     }
 
