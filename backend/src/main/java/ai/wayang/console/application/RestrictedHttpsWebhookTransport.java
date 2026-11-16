@@ -66,8 +66,8 @@ public class RestrictedHttpsWebhookTransport implements ReconciliationSlaWebhook
         try (Socket raw = new Socket()) {
             raw.connect(new InetSocketAddress(address, 443), timeoutMillis);
             raw.setSoTimeout(timeoutMillis);
-            SSLSocket tls = (SSLSocket) SSLSocketFactory.getDefault()
-                    .createSocket(raw, host, 443, true);
+            SSLSocketFactory sslSocketFactory = (SSLSocketFactory) SSLSocketFactory.getDefault();
+            SSLSocket tls = (SSLSocket) sslSocketFactory.createSocket(raw, host, 443, true);
             try (tls) {
                 SSLParameters parameters = tls.getSSLParameters();
                 parameters.setEndpointIdentificationAlgorithm("HTTPS");
