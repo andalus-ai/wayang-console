@@ -146,8 +146,14 @@ public class RestrictedHttpsWebhookTransport implements ReconciliationSlaWebhook
             int first = bytes[0] & 0xff;
             int second = bytes[1] & 0xff;
             // Reject IPv6 unique-local, deprecated site-local, and IPv4-mapped addresses.
-            if ((first & 0xfe) == 0xfc || (first == 0xfe && (second & 0xc0) == 0xc0)
-                    || (first == 0 && second == 0 && bytes[2] == 0 && bytes[3] == 0)) return false;
+            // Only global-unicast 2000::/3 is accepted. Reject ULA, link/site-local,
+            // documentation, transition, mapped, and other special-purpose IPv6 ranges.
+            if ((first & 0xe0) != 0x20
+                    || (first == 0xfe && (second & 0xc0) == 0x80)
+                    || (first == 0xfe && (second & 0xc0) == 0xc0)
+                    || (first == 0x20 && (bytes[1] & 0xff) == 0x01
+                        && ((bytes[2] & 0xff) == 0x00 || (bytes[2] & 0xff) == 0x0d))
+                    || (first == 0x20 && (bytes[1] & 0xff) == 0x02)) return false;
             return true;
         }
         int a = bytes[0] & 0xff, b = bytes[1] & 0xff, c = bytes[2] & 0xff;
