@@ -9,7 +9,10 @@ import java.util.UUID;
 @Table(name = "wc_reconciliation_webhook_delivery",
         uniqueConstraints = @UniqueConstraint(name = "uk_wc_recon_webhook_event",
                 columnNames = {"organization_id", "environment_id", "audit_sequence"}),
-        indexes = @Index(name = "idx_wc_recon_webhook_due", columnList = "delivery_status, next_attempt_at, lease_until"))
+        indexes = {
+                @Index(name = "idx_wc_recon_webhook_due", columnList = "delivery_status, next_attempt_at, lease_until"),
+                @Index(name = "idx_wc_recon_webhook_scope_status", columnList = "organization_id, environment_id, delivery_status")
+        })
 public class ReconciliationWebhookDeliveryEntity extends PanacheEntityBase {
     @Id public UUID id;
     @Column(name = "organization_id", nullable = false) public UUID organizationId;
