@@ -37,7 +37,10 @@ public class RestrictedHttpsWebhookTransport implements ReconciliationSlaWebhook
             throw new IllegalArgumentException("Invalid webhook transport request");
         }
         String host = endpoint.getHost();
-        if (host == null || endpoint.getPort() != -1 && endpoint.getPort() != 443) {
+        if (!"https".equalsIgnoreCase(endpoint.getScheme()) || host == null
+                || endpoint.getUserInfo() != null || endpoint.getQuery() != null
+                || endpoint.getFragment() != null
+                || endpoint.getPort() != -1 && endpoint.getPort() != 443) {
             throw new IllegalArgumentException("Only HTTPS DNS endpoints on port 443 are supported");
         }
         int timeoutMillis = Math.toIntExact(timeout.toMillis());
