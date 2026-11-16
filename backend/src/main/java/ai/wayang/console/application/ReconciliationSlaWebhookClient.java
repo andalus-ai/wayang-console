@@ -49,11 +49,12 @@ public class ReconciliationSlaWebhookClient {
 
         byte[] body = serialize(transition);
         long timestamp = Instant.now().getEpochSecond();
-        char[] secret = secretResolvers.get().resolve(secretReference);
-        if (secret == null) {
-            throw new IllegalStateException("Webhook secret reference could not be resolved");
-        }
+        char[] secret = null;
         try {
+            secret = secretResolvers.get().resolve(secretReference);
+            if (secret == null) {
+                throw new IllegalStateException("Webhook secret reference could not be resolved");
+            }
             String signature = ReconciliationSlaWebhookSupport.signature(secret, timestamp, body);
             Map<String, String> headers = Map.of(
                     "Content-Type", "application/json",
@@ -62,7 +63,7 @@ public class ReconciliationSlaWebhookClient {
                     "Idempotency-Key", ReconciliationSlaWebhookSupport.idempotencyKey(transition));
             return transports.get().post(safeEndpoint, headers, body, Duration.ofSeconds(timeoutSeconds));
         } finally {
-            java.util.Arrays.fill(secret, '\0');
+            if (secret != null) java.util.Arrays.fill(secret, '\0');
             java.util.Arrays.fill(body, (byte) 0);
         }
     }
