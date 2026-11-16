@@ -50,7 +50,7 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
             throw new IllegalArgumentException("A persisted scoped audit transition is required");
         }
         // Refuse acceptance until this environment has an explicitly configured destination.
-        destination(transition.environmentId());
+        destination(transition.organizationId(), transition.environmentId());
 
         ReconciliationWebhookCursorEntity cursor = cursor(
                 transition.organizationId(), transition.environmentId(), LockModeType.PESSIMISTIC_WRITE);
@@ -246,9 +246,9 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
                 organizationId, environmentId, sequence).firstResult();
     }
 
-    public static Destination destination(UUID environmentId) {
+    public static Destination destination(UUID organizationId, UUID environmentId) {
         Config config = ConfigProvider.getConfig();
-        String prefix = "wayang.console.reconciliation.sla.webhook.destinations." + environmentId;
+        String prefix = "wayang.console.reconciliation.sla.webhook.destinations." + organizationId + "." + environmentId;
         String endpoint = config.getOptionalValue(prefix + ".endpoint", String.class).orElse(null);
         String secretReference = config.getOptionalValue(prefix + ".secret-reference", String.class).orElse(null);
         if (endpoint == null || secretReference == null || secretReference.isBlank()) {
