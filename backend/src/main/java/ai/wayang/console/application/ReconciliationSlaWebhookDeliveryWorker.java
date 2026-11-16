@@ -21,7 +21,7 @@ public class ReconciliationSlaWebhookDeliveryWorker {
     void deliverDue() {
         for (var claim : sink.claimDue(Instant.now(), 20)) {
             try {
-                var destination = ReconciliationSlaWebhookSink.destination(claim.environmentId());
+                var destination = ReconciliationSlaWebhookSink.destination(claim.organizationId(), claim.environmentId());
                 var transition = new DeploymentReconciliationService.SlaAlertTransition(
                         claim.organizationId(), claim.environmentId(), claim.deploymentId(),
                         claim.fromStatus(), claim.toStatus(), claim.occurredAt(),
