@@ -55,7 +55,9 @@ public final class ReconciliationSlaWebhookSupport {
         if (secret == null || secret.length < 32 || body == null) {
             throw new IllegalArgumentException("Webhook signing secret must contain at least 32 characters");
         }
-        byte[] key = new String(secret).getBytes(StandardCharsets.UTF_8);
+        java.nio.ByteBuffer encoded = StandardCharsets.UTF_8.encode(java.nio.CharBuffer.wrap(secret));
+        byte[] key = new byte[encoded.remaining()];
+        encoded.get(key);
         byte[] prefix = (timestampEpochSeconds + ".").getBytes(StandardCharsets.UTF_8);
         byte[] signed = new byte[prefix.length + body.length];
         System.arraycopy(prefix, 0, signed, 0, prefix.length);
