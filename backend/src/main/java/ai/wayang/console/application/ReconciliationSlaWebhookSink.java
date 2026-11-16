@@ -155,6 +155,8 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
 
     @Transactional
     public List<DeliveryClaim> claimDue(Instant now, int limit) {
+        // Match PostgreSQL TIMESTAMP WITH TIME ZONE precision so lease fencing survives reloads.
+        now = now.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         int bounded = Math.max(1, Math.min(limit, 50));
         List<ReconciliationWebhookDeliveryEntity> due = ReconciliationWebhookDeliveryEntity
                 .<ReconciliationWebhookDeliveryEntity>find(
