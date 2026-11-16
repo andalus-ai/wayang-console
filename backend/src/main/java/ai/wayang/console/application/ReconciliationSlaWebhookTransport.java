@@ -21,7 +21,7 @@ public interface ReconciliationSlaWebhookTransport {
         }
 
         public boolean retryable() {
-            return statusCode == 408 || statusCode == 425 || statusCode == 429 || statusCode >= 500;
+            return statusCode == 408 || statusCode == 425 || statusCode == 429 || statusCode >= 500 && statusCode <= 599;
         }
     }
 }
