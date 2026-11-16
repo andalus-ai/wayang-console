@@ -25,6 +25,7 @@ class DeploymentReconciliationIntegrationTest {
     @Inject AuditIntegrityService audit;
     @Inject ReconciliationSlaAlertDispatcher alertDispatcher;
     @Inject TestReconciliationSlaAlertSink testAlertSink;
+    @Inject ReconciliationSlaWebhookSink webhookSink;
 
     @Test
     @TestTransaction
@@ -79,6 +80,55 @@ class DeploymentReconciliationIntegrationTest {
         assertEquals(1L, status.delivered());
         assertEquals(0L, status.pending());
         assertEquals("HEALTHY", status.health());
+    }
+
+
+    @Test
+    @TestTransaction
+    void durableWebhookSinkAcceptsIdempotentlyAndTracksDelivery() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID(), deploymentId = UUID.randomUUID();
+        String prefix = "wayang.console.reconciliation.sla.webhook.destinations." + org + "." + env;
+        String previousAllowed = System.getProperty("wayang.console.reconciliation.sla.webhook.allowed-hosts");
+        String previousEndpoint = System.getProperty(prefix + ".endpoint");
+        String previousSecret = System.getProperty(prefix + ".secret-reference");
+        try {
+            System.setProperty("wayang.console.reconciliation.sla.webhook.allowed-hosts", "alerts.example.com");
+            System.setProperty(prefix + ".endpoint", "https://alerts.example.com/hooks/wayang");
+            System.setProperty(prefix + ".secret-reference", "env:WAYANG_TEST_WEBHOOK_SECRET");
+            var transition = new DeploymentReconciliationService.SlaAlertTransition(
+                    org, env, deploymentId, "WARNING", "CRITICAL",
+                    Instant.parse("2026-11-16T00:00:00Z"), "console:test", 42L, "test-record-hash");
+
+            assertEquals(0L, webhookSink.lastAcceptedSequence(org, env));
+            webhookSink.accept(transition, 0L);
+            assertEquals(42L, webhookSink.lastAcceptedSequence(org, env));
+            webhookSink.accept(transition, 0L); // same audit hash is an idempotent acceptance
+            assertEquals(1L, ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity.count(
+                    "organizationId = ?1 and environmentId = ?2", org, env));
+            assertThrows(IllegalStateException.class, () -> webhookSink.accept(
+                    new DeploymentReconciliationService.SlaAlertTransition(
+                            org, env, UUID.randomUUID(), "CRITICAL", "HEALTHY",
+                            Instant.now(), "console:test", 43L, "next-hash"), 0L));
+
+            var claims = webhookSink.claimDue(Instant.now().plusSeconds(1), 10);
+            assertEquals(1, claims.size());
+            webhookSink.complete(claims.get(0), new ReconciliationSlaWebhookTransport.Response(204));
+            var status = webhookSink.status(org, Set.of(env));
+            assertEquals(1L, status.accepted());
+            assertEquals(0L, status.pending());
+            assertEquals(1L, status.delivered());
+            assertEquals(0L, status.failed());
+            assertEquals("HEALTHY", status.health());
+        } finally {
+            restoreProperty("wayang.console.reconciliation.sla.webhook.allowed-hosts", previousAllowed);
+            restoreProperty(prefix + ".endpoint", previousEndpoint);
+            restoreProperty(prefix + ".secret-reference", previousSecret);
+        }
+    }
+
+    private static void restoreProperty(String key, String previous) {
+        if (previous == null) System.clearProperty(key);
+        else System.setProperty(key, previous);
     }
 
     @Test

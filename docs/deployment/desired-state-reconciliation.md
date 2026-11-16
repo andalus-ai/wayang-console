@@ -270,3 +270,46 @@ Operators can inspect provider status at:
 The endpoint requires read authorization and passes only the authenticated organization/environment scope to each provider. It returns aggregate counts and bounded failure metadata, never destinations, credentials, or secret material. A provider status exception is represented as `UNAVAILABLE` and does not affect reconciliation.
 
 No new database table, command queue, or generic outbox is introduced. Runtime execution and reconciliation do not wait for external notification delivery.
+
+
+## M1.10.15 — secure webhook extension boundary
+
+The webhook extension primitives provide a vendor-neutral request contract without placing destinations or credentials in operator API payloads:
+
+- `ReconciliationSlaWebhookSecretResolver` resolves an opaque secret reference through an external secret manager. Implementations must return a caller-owned character array and never log secret values.
+- `ReconciliationSlaWebhookTransport` is the only network boundary. A production implementation must enforce TLS hostname/certificate verification, disable redirects, apply destination-IP egress checks after DNS resolution (including loopback, private, link-local, and DNS-rebinding defenses), bound response consumption, and honor the request timeout. A plain unrestricted HTTP client is not compliant.
+- `ReconciliationSlaWebhookSupport` accepts HTTPS only, rejects user-info, query strings, fragments, non-standard ports, IP literals, and local hostnames, and requires an exact DNS-host allowlist match.
+- `ReconciliationSlaWebhookClient` serializes the persisted audit transition, signs the exact request bytes using HMAC-SHA256 over `timestamp + "." + body`, and supplies a stable `Idempotency-Key` derived from organization, environment, audit sequence, and record hash. The signing header is `X-Wayang-Webhook-Signature: v1=<hex>`; timestamp is supplied separately in `X-Wayang-Webhook-Timestamp`.
+- HTTP response classification is exposed as 2xx success and retryable 408/425/429/5xx. The durable sink/provider still owns scheduling, retry/backoff, cooldown, and terminal failure state.
+
+Configuration:
+
+- `wayang.console.reconciliation.sla.webhook.allowed-hosts` / `WAYANG_CONSOLE_SLA_WEBHOOK_ALLOWED_HOSTS`: exact comma-separated DNS host allowlist; empty by default.
+- `wayang.console.reconciliation.sla.webhook.timeout-seconds` / `WAYANG_CONSOLE_SLA_WEBHOOK_TIMEOUT_SECONDS`: request timeout, 1–30 seconds; defaults to 5.
+
+**M1.10.15 boundary (superseded by M1.10.16):** this milestone intentionally introduced only the extension SPIs and did not ship a default unrestricted HTTP client or plaintext secret storage. The concrete secret resolver, restricted HTTPS transport, and provider-owned durable lifecycle are implemented in M1.10.16 below.
+
+
+## M1.10.16 — durable HTTPS webhook provider
+
+The built-in `wayang-https-webhook` sink now implements the M1.10.14 durable acceptance contract. The audit chain remains the replay source; the provider owns its separate delivery lifecycle in `wc_reconciliation_webhook_cursor` and `wc_reconciliation_webhook_delivery`.
+
+- Acceptance stores the audit-backed transition and advances the organization/environment cursor in one transaction. A unique scope/sequence constraint and pessimistic cursor lock protect concurrent workers; duplicate acceptance of the same audit hash is idempotent.
+- Delivery claims use a short database lease. Network I/O occurs after the claim transaction commits, and completion is guarded by the claim attempt and lease so stale workers cannot overwrite a newer attempt.
+- The provider retries transport failures and HTTP 408/425/429/5xx with exponential backoff (30 seconds up to one hour), up to 10 attempts. Other HTTP statuses become terminal failures. A worker crash leaves a lease that can be reclaimed after expiry.
+- Delivery status aggregates accepted, pending, delivered, and failed counts within the authenticated organization/environment scope. Failure codes are bounded identifiers; endpoint URLs and secret references are not returned.
+- `MicroProfileConfigWebhookSecretResolver` resolves either an opaque MicroProfile Config property name or an `env:VARIABLE_NAME` reference. Production should source these values from an external ConfigSource or orchestrator-injected secret, not source control.
+- `RestrictedHttpsWebhookTransport` resolves DNS once per attempt, rejects loopback/private/link-local/reserved destinations, connects to the selected resolved address (avoiding a second DNS lookup), preserves TLS SNI and hostname verification, disables redirects, enforces request timeouts, and bounds response headers. It supports HTTPS on port 443 only.
+
+### Per-tenant destination configuration
+
+Each organization/environment pair has its own destination:
+
+- `wayang.console.reconciliation.sla.webhook.destinations.<organization-uuid>.<environment-uuid>.endpoint`
+- `wayang.console.reconciliation.sla.webhook.destinations.<organization-uuid>.<environment-uuid>.secret-reference`
+
+The endpoint host must also appear exactly in `wayang.console.reconciliation.sla.webhook.allowed-hosts`. The secret reference may be `env:WAYANG_SECRET_<NAME>` or the name of a property supplied by a trusted external MicroProfile ConfigSource. The resolved secret must contain at least 32 characters. The timeout remains configurable from 1 to 30 seconds.
+
+Do not place secret values in `application.properties`, source control, operator API requests, destination URLs, or logs. Inject them from an orchestrator secret or a dedicated secret-manager ConfigSource and rotate them using that system's controls. Destination configuration is organization/environment scoped; no destination is shared implicitly between tenants.
+
+The provider delivery tables are extension-owned persistence, not a second Console outbox: they exist only to satisfy this sink's durable acceptance, retry, lease, and status contract. Runtime execution and reconciliation remain independent of webhook delivery.
