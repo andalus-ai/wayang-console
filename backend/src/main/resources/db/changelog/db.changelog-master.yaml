@@ -648,6 +648,13 @@ databaseChangeLog:
               - column: { name: delivery_status }
               - column: { name: next_attempt_at }
               - column: { name: lease_until }
+        - createIndex:
+            tableName: wc_reconciliation_webhook_delivery
+            indexName: idx_wc_recon_webhook_scope_status
+            columns:
+              - column: { name: organization_id }
+              - column: { name: environment_id }
+              - column: { name: delivery_status }
       rollback:
         - dropTable: { tableName: wc_reconciliation_webhook_delivery }
         - dropTable: { tableName: wc_reconciliation_webhook_cursor }
