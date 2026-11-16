@@ -43,7 +43,7 @@ public class ReconciliationSlaWebhookClient {
         if (timeoutSeconds < 1 || timeoutSeconds > 30) {
             throw new IllegalStateException("Webhook timeout must be between 1 and 30 seconds");
         }
-        if (secretResolvers.isUnsatisfied() || transports.isUnsatisfied()) {
+        if (!secretResolvers.isResolvable() || !transports.isResolvable()) {
             throw new IllegalStateException("A secure webhook secret resolver and egress transport are required");
         }
 
