@@ -616,4 +616,68 @@ class DeploymentReconciliationIntegrationTest {
         assertTrue(row.diagnostic.contains("5 automatic retries"));
     }
 
+
+    @Test
+    @TestTransaction
+    void webhookDeliveryHistoryIsScopedAndRetryPreservesAuditIdentity() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID(), otherEnv = UUID.randomUUID();
+        var event = new ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity();
+        event.id = UUID.randomUUID();
+        event.organizationId = org;
+        event.environmentId = env;
+        event.auditSequence = 41L;
+        event.recordHash = "a".repeat(64);
+        event.deploymentId = UUID.randomUUID();
+        event.fromStatus = "WARNING";
+        event.toStatus = "CRITICAL";
+        event.occurredAt = Instant.now().minusSeconds(60);
+        event.status = "FAILED";
+        event.attemptCount = 10;
+        event.createdAt = Instant.now().minusSeconds(30);
+        event.lastAttemptAt = Instant.now().minusSeconds(10);
+        event.lastFailureCode = "HTTP_503";
+        event.persist();
+
+        var hidden = new ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity();
+        hidden.id = UUID.randomUUID();
+        hidden.organizationId = org;
+        hidden.environmentId = otherEnv;
+        hidden.auditSequence = 42L;
+        hidden.recordHash = "b".repeat(64);
+        hidden.deploymentId = UUID.randomUUID();
+        hidden.fromStatus = "WARNING";
+        hidden.toStatus = "CRITICAL";
+        hidden.occurredAt = Instant.now();
+        hidden.status = "FAILED";
+        hidden.attemptCount = 10;
+        hidden.createdAt = Instant.now();
+        hidden.persist();
+
+        var page = webhookSink.deliveryHistory(org, Set.of(env), 0, 25);
+        assertEquals(1L, page.total());
+        assertEquals(event.id, page.items().get(0).id());
+
+        var retried = webhookSink.retryFailed(org, Set.of(env), event.id,
+                "test-operator", "Operator verified endpoint recovery");
+        assertEquals("PENDING", retried.status());
+        assertEquals(0, retried.attemptCount());
+        assertNull(retried.failureCode());
+        assertNotNull(retried.nextAttemptAt());
+        assertEquals(41L, retried.auditSequence());
+
+        var persisted = ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity
+                .<ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity>findById(event.id);
+        assertEquals("a".repeat(64), persisted.recordHash);
+        assertEquals(1L, ai.wayang.console.adapter.persistence.AuditRecordEntity.count(
+                "organizationId = ?1 and environmentId = ?2 and action = ?3 and resourceId = ?4",
+                org, env, "RECONCILIATION_WEBHOOK_RETRY_REQUESTED", event.id.toString()));
+
+        assertThrows(jakarta.ws.rs.NotFoundException.class,
+                () -> webhookSink.retryFailed(org, Set.of(otherEnv), event.id,
+                        "test-operator", "Must not cross environment scope"));
+        assertThrows(jakarta.ws.rs.ConflictException.class,
+                () -> webhookSink.retryFailed(org, Set.of(env), event.id,
+                        "test-operator", "A second retry requires another terminal failure"));
+    }
+
 }
