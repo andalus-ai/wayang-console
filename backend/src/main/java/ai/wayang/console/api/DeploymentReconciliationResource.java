@@ -3,6 +3,7 @@ package ai.wayang.console.api;
 import ai.wayang.console.application.DeploymentReconciliationService;
 import ai.wayang.console.application.RuntimeCommandService;
 import ai.wayang.console.application.ReconciliationSlaAlertDispatcher;
+import ai.wayang.console.application.ReconciliationSlaWebhookSink;
 import ai.wayang.console.security.ConsoleOperatorContext;
 import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
@@ -22,6 +23,7 @@ public class DeploymentReconciliationResource {
     @Inject DeploymentReconciliationService reconciliation;
     @Inject RuntimeCommandService commands;
     @Inject ReconciliationSlaAlertDispatcher alertDispatcher;
+    @Inject ReconciliationSlaWebhookSink webhookSink;
 
     public record DesiredStateRequest(String desiredState) {}
 
@@ -75,6 +77,28 @@ public class DeploymentReconciliationResource {
     public java.util.List<ReconciliationSlaAlertDispatcher.AlertSinkStatus> reconciliationSlaAlertDelivery() {
         operator.requireRead();
         return alertDispatcher.deliveryStatuses(operator.organizationId(), operator.environmentIds());
+    }
+
+
+    @GET
+    @Path("/reconciliation/sla/webhook/deliveries")
+    public ReconciliationSlaWebhookSink.DeliveryPage reconciliationSlaWebhookDeliveries(
+            @QueryParam("page") @DefaultValue("0") int page,
+            @QueryParam("size") @DefaultValue("25") int size) {
+        operator.requireRead();
+        return webhookSink.deliveryHistory(operator.organizationId(), operator.environmentIds(), page, size);
+    }
+
+    public record WebhookDeliveryRetryRequest(String reason) {}
+
+    @POST
+    @Path("/reconciliation/sla/webhook/deliveries/{deliveryId}/retry")
+    public ReconciliationSlaWebhookSink.DeliveryView retryReconciliationSlaWebhookDelivery(
+            @PathParam("deliveryId") UUID deliveryId, WebhookDeliveryRetryRequest request) {
+        operator.requireAdmin();
+        if (request == null) throw new BadRequestException("Request body is required");
+        return webhookSink.retryFailed(operator.organizationId(), operator.environmentIds(),
+                deliveryId, operator.subject(), request.reason());
     }
 
     @GET
