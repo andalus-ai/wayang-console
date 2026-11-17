@@ -229,6 +229,7 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
             return new DeliveryPage(List.of(), 0, page, Math.max(1, Math.min(size, 100)));
         }
         int boundedSize = Math.max(1, Math.min(size, 100));
+        if (page > Integer.MAX_VALUE / boundedSize) throw new BadRequestException("page is too large");
         long total = entityManager.createQuery("""
                 select count(d) from ReconciliationWebhookDeliveryEntity d
                 where d.organizationId = :organizationId and d.environmentId in :environments
