@@ -90,6 +90,13 @@ public final class ReconciliationSlaWebhookSupport {
         }
     }
 
+    public static String validateSecretVersion(String version) {
+        if (version == null || !version.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,63}")) {
+            throw new IllegalArgumentException("Webhook secret version must be a bounded opaque identifier");
+        }
+        return version;
+    }
+
     private static boolean isIpLiteral(String host) {
         // URI#getHost returns bracketed IPv6 literals on some JDKs and bare IPv6 on others.
         String value = host.startsWith("[") && host.endsWith("]")

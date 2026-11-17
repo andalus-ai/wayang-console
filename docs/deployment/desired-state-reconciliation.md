@@ -313,3 +313,32 @@ The endpoint host must also appear exactly in `wayang.console.reconciliation.sla
 Do not place secret values in `application.properties`, source control, operator API requests, destination URLs, or logs. Inject them from an orchestrator secret or a dedicated secret-manager ConfigSource and rotate them using that system's controls. Destination configuration is organization/environment scoped; no destination is shared implicitly between tenants.
 
 The provider delivery tables are extension-owned persistence, not a second Console outbox: they exist only to satisfy this sink's durable acceptance, retry, lease, and status contract. Runtime execution and reconciliation remain independent of webhook delivery.
+
+
+## M1.10.17 — webhook operator recovery and delivery history
+
+The built-in HTTPS SLA webhook provider now exposes a paginated, authenticated operator view of delivery records:
+
+`GET /api/v1/console/deployments/reconciliation/sla/webhook/deliveries?page=0&size=25`
+
+The response is scoped to the authenticated operator's organization and visible environments. It includes the original audit sequence, deployment, transition, delivery state, attempt count, timestamps, and bounded failure code. It does not expose destination URLs, secret references, secret material, or raw transport exception messages. Page size is capped at 100.
+
+A terminally failed event can be retried by an administrator:
+
+`POST /api/v1/console/deployments/reconciliation/sla/webhook/deliveries/{deliveryId}/retry`
+
+The request requires a reason (1–500 characters). The Console locks and scopes the delivery row, accepts only `FAILED`, and appends `RECONCILIATION_WEBHOOK_RETRY_REQUESTED` to the existing tamper-evident audit chain in the same transaction. It returns the same event to `PENDING`, clears the prior lease/failure state, and resets the attempt counter so the existing worker can retry immediately. The original audit sequence, record hash, delivery ID, and provider acceptance cursor are unchanged; the operation does not manufacture a new alert event or bypass the existing worker/transport policy. Non-terminal events return HTTP 409, and out-of-scope or unknown event IDs return HTTP 404.
+
+
+## M1.10.18 — webhook operations and lifecycle management
+
+Operational visibility is available to authenticated operators at:
+
+- `GET /api/v1/console/deployments/reconciliation/sla/webhook/metrics`
+- The existing `GET /api/v1/console/deployments/reconciliation/sla/metrics/prometheus` exposition now includes webhook accepted, pending, delivered, failed, oldest-pending-age, and average delivery-latency gauges.
+
+Metrics are calculated only over the operator's organization and visible environments. Prometheus output contains no organization, environment, deployment, runtime, or user labels. Average delivery latency is computed from retained successful delivery rows.
+
+Webhook destinations may define an opaque `secret-version` alongside `secret-reference`. The version is sent as `X-Wayang-Webhook-Key-Version` and recorded as the last version used for each delivery. It is an identifier only, never key material. Rotate a key by publishing the new secret under a new reference, changing the configured reference and version together, and arranging receiver-side overlap for old/new versions while in-flight requests finish. Pending retries resolve the current destination at attempt time, so they use the newly configured key.
+
+Terminal delivery history is retained for 90 days by default. A daily bounded cleanup removes only old `DELIVERED` and `FAILED` provider rows (maximum 500 per run by default). `PENDING` and `DELIVERING` records are never eligible. The provider cursor and tamper-evident audit chain are not deleted; retention applies only to operational delivery detail. Retention is configurable with `WAYANG_CONSOLE_SLA_WEBHOOK_RETENTION_DAYS` (7–3650) and `WAYANG_CONSOLE_SLA_WEBHOOK_RETENTION_BATCH_SIZE` (1–1000).

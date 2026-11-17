@@ -41,4 +41,16 @@ class ReconciliationSlaWebhookProviderTest {
                 URI.create("https://localhost/hook"), java.util.Map.of(),
                 new byte[0], Duration.ofSeconds(1)));
     }
+    @Test
+    void secretVersionIsAnOpaqueBoundedIdentifier() {
+        assertEquals("key-2026-11", ReconciliationSlaWebhookSupport.validateSecretVersion("key-2026-11"));
+        assertEquals("legacy", ReconciliationSlaWebhookSupport.validateSecretVersion("legacy"));
+        assertThrows(IllegalArgumentException.class,
+                () -> ReconciliationSlaWebhookSupport.validateSecretVersion("../secret"));
+        assertThrows(IllegalArgumentException.class,
+                () -> ReconciliationSlaWebhookSupport.validateSecretVersion("contains spaces"));
+        assertThrows(IllegalArgumentException.class,
+                () -> ReconciliationSlaWebhookSupport.validateSecretVersion("x".repeat(65)));
+    }
 }
+

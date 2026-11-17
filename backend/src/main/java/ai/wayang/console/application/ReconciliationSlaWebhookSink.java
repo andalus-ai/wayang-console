@@ -27,6 +27,7 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
     private static final long MAX_BACKOFF_SECONDS = 3600;
 
     @Inject EntityManager entityManager;
+    @Inject AuditIntegrityService audit;
 
     @Override
     public String sinkId() {
@@ -214,11 +215,149 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
         }
     }
 
+
+    public record DeliveryView(UUID id, long auditSequence, UUID deploymentId, String fromStatus,
+            String toStatus, Instant occurredAt, String status, int attemptCount, Instant createdAt,
+            Instant nextAttemptAt, Instant lastAttemptAt, Instant deliveredAt, String failureCode,
+            String secretVersion) {}
+
+    public record WebhookOperationalMetrics(long accepted, long pending, long delivered, long failed,
+            long oldestPendingAgeSeconds, double averageDeliveryLatencySeconds,
+            Instant lastDeliveredAt, Instant lastFailureAt, String health) {}
+
+    public record DeliveryPage(List<DeliveryView> items, long total, int page, int size) {}
+
+    @Transactional
+    public DeliveryPage deliveryHistory(UUID organizationId, Set<UUID> environments, int page, int size) {
+        if (page < 0) throw new jakarta.ws.rs.BadRequestException("page must be zero or greater");
+        if (organizationId == null || environments == null || environments.isEmpty()) {
+            return new DeliveryPage(List.of(), 0, page, Math.max(1, Math.min(size, 100)));
+        }
+        int boundedSize = Math.max(1, Math.min(size, 100));
+        if (page > Integer.MAX_VALUE / boundedSize) throw new jakarta.ws.rs.BadRequestException("page is too large");
+        long total = entityManager.createQuery("""
+                select count(d) from ReconciliationWebhookDeliveryEntity d
+                where d.organizationId = :organizationId and d.environmentId in :environments
+                """, Long.class)
+                .setParameter("organizationId", organizationId)
+                .setParameter("environments", environments)
+                .getSingleResult();
+        List<ReconciliationWebhookDeliveryEntity> rows = entityManager.createQuery("""
+                select d from ReconciliationWebhookDeliveryEntity d
+                where d.organizationId = :organizationId and d.environmentId in :environments
+                order by d.createdAt desc, d.auditSequence desc
+                """, ReconciliationWebhookDeliveryEntity.class)
+                .setParameter("organizationId", organizationId)
+                .setParameter("environments", environments)
+                .setFirstResult(Math.multiplyExact(page, boundedSize))
+                .setMaxResults(boundedSize)
+                .getResultList();
+        return new DeliveryPage(rows.stream().map(ReconciliationSlaWebhookSink::view).toList(),
+                total, page, boundedSize);
+    }
+
+    @Transactional
+    public DeliveryView retryFailed(UUID organizationId, Set<UUID> environments, UUID deliveryId,
+            String actor, String reason) {
+        if (organizationId == null || environments == null || environments.isEmpty()) {
+            throw new jakarta.ws.rs.NotFoundException("Webhook delivery was not found");
+        }
+        if (deliveryId == null) throw new jakarta.ws.rs.BadRequestException("deliveryId is required");
+        if (reason == null || reason.isBlank() || reason.trim().length() > 500) {
+            throw new jakarta.ws.rs.BadRequestException("A retry reason between 1 and 500 characters is required");
+        }
+        ReconciliationWebhookDeliveryEntity event = entityManager.createQuery("""
+                select d from ReconciliationWebhookDeliveryEntity d
+                where d.id = :id and d.organizationId = :organizationId
+                  and d.environmentId in :environments
+                """, ReconciliationWebhookDeliveryEntity.class)
+                .setParameter("id", deliveryId)
+                .setParameter("organizationId", organizationId)
+                .setParameter("environments", environments)
+                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                .getResultStream().findFirst()
+                .orElseThrow(() -> new jakarta.ws.rs.NotFoundException("Webhook delivery was not found"));
+        if (!"FAILED".equals(event.status)) {
+            throw new jakarta.ws.rs.WebApplicationException("Only terminally failed webhook deliveries can be retried", jakarta.ws.rs.core.Response.Status.CONFLICT);
+        }
+        Instant now = Instant.now();
+        audit.append(event.organizationId, event.environmentId, actor,
+                "RECONCILIATION_WEBHOOK_RETRY_REQUESTED", "WEBHOOK_DELIVERY",
+                event.id.toString(), now, "SUCCESS");
+        // Preserve the original audit identity/idempotency key. This is a new delivery attempt,
+        // not a new accepted event and must not move the provider's acceptance cursor.
+        event.status = "PENDING";
+        event.attemptCount = 0;
+        event.nextAttemptAt = now;
+        event.lastAttemptAt = null;
+        event.leaseUntil = null;
+        event.deliveredAt = null;
+        event.lastFailureCode = null;
+        entityManager.flush();
+        return view(event);
+    }
+
+    @Transactional
+    public void recordSecretVersion(DeliveryClaim claim, String secretVersion) {
+        String safeVersion = ReconciliationSlaWebhookSupport.validateSecretVersion(secretVersion);
+        ReconciliationWebhookDeliveryEntity event = entityManager.find(
+                ReconciliationWebhookDeliveryEntity.class, claim.id(), LockModeType.PESSIMISTIC_WRITE);
+        if (!ownsLease(event, claim)) return;
+        event.lastSecretVersion = safeVersion;
+    }
+
+    @Transactional
+    public WebhookOperationalMetrics operationalMetrics(UUID organizationId, Set<UUID> environments, Instant now) {
+        if (organizationId == null || environments == null || environments.isEmpty()) {
+            return new WebhookOperationalMetrics(0, 0, 0, 0, 0, 0d, null, null, "HEALTHY");
+        }
+        DeliveryStatus current = status(organizationId, environments);
+        long oldestAge = current.oldestPendingAt() == null ? 0L
+                : Math.max(0L, java.time.Duration.between(current.oldestPendingAt(), now).getSeconds());
+        var latencyQuery = entityManager.createNativeQuery("""
+                select coalesce(avg(extract(epoch from (delivered_at - created_at))), 0)
+                from wc_reconciliation_webhook_delivery
+                where organization_id = :organizationId and environment_id in (:environments)
+                  and delivery_status = 'DELIVERED' and delivered_at is not null
+                """).unwrap(org.hibernate.query.NativeQuery.class);
+        Number average = (Number) latencyQuery.setParameter("organizationId", organizationId)
+                .setParameterList("environments", environments).getSingleResult();
+        return new WebhookOperationalMetrics(current.accepted(), current.pending(), current.delivered(),
+                current.failed(), oldestAge, average.doubleValue(), current.lastDeliveredAt(),
+                current.lastFailureAt(), current.health());
+    }
+
+    @Transactional
+    public int purgeTerminalBefore(Instant cutoff, int limit) {
+        if (cutoff == null) throw new IllegalArgumentException("A retention cutoff is required");
+        int bounded = Math.max(1, Math.min(limit, 1000));
+        List<ReconciliationWebhookDeliveryEntity> expired = entityManager.createQuery("""
+                select d from ReconciliationWebhookDeliveryEntity d
+                where (d.status = 'DELIVERED' and d.deliveredAt < :cutoff)
+                   or (d.status = 'FAILED' and d.lastAttemptAt < :cutoff)
+                order by d.createdAt asc
+                """, ReconciliationWebhookDeliveryEntity.class)
+                .setParameter("cutoff", cutoff)
+                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                .setMaxResults(bounded)
+                .getResultList();
+        expired.forEach(entityManager::remove);
+        entityManager.flush();
+        return expired.size();
+    }
+
+    private static DeliveryView view(ReconciliationWebhookDeliveryEntity event) {
+        return new DeliveryView(event.id, event.auditSequence, event.deploymentId,
+                event.fromStatus, event.toStatus, event.occurredAt, event.status,
+                event.attemptCount, event.createdAt, event.nextAttemptAt, event.lastAttemptAt,
+                event.deliveredAt, event.lastFailureCode, event.lastSecretVersion);
+    }
+
     public record DeliveryClaim(UUID id, UUID organizationId, UUID environmentId, UUID deploymentId,
             String fromStatus, String toStatus, Instant occurredAt, long auditSequence,
             String recordHash, int attempt, Instant leaseUntil) {}
 
-    public record Destination(URI endpoint, String secretReference) {}
+    public record Destination(URI endpoint, String secretReference, String secretVersion) {}
 
     public static long backoffSeconds(int attempt) {
         int exponent = Math.max(0, Math.min(attempt - 1, 10));
@@ -270,7 +409,9 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
         if (!secretReference.matches("[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}")) {
             throw new IllegalStateException("Webhook secret reference is invalid");
         }
-        return new Destination(uri, secretReference);
+        String secretVersion = config.getOptionalValue(prefix + ".secret-version", String.class).orElse("legacy");
+        secretVersion = ReconciliationSlaWebhookSupport.validateSecretVersion(secretVersion);
+        return new Destination(uri, secretReference, secretVersion);
     }
 
     private static String safeFailureCode(String value) {

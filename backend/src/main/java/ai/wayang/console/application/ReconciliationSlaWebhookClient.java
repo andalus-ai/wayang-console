@@ -34,6 +34,13 @@ public class ReconciliationSlaWebhookClient {
     public ReconciliationSlaWebhookTransport.Response deliver(
             URI endpoint, String secretReference,
             DeploymentReconciliationService.SlaAlertTransition transition) {
+        return deliver(endpoint, secretReference, "legacy", transition);
+    }
+
+    public ReconciliationSlaWebhookTransport.Response deliver(
+            URI endpoint, String secretReference, String secretVersion,
+            DeploymentReconciliationService.SlaAlertTransition transition) {
+        String safeVersion = ReconciliationSlaWebhookSupport.validateSecretVersion(secretVersion);
         URI safeEndpoint = ReconciliationSlaWebhookSupport.validateEndpoint(endpoint, allowedHosts());
         if (secretReference == null || !secretReference.matches("[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}")) {
             throw new IllegalArgumentException("A valid external webhook secret reference is required");
@@ -58,7 +65,8 @@ public class ReconciliationSlaWebhookClient {
                     "Content-Type", "application/json",
                     "X-Wayang-Webhook-Timestamp", Long.toString(timestamp),
                     "X-Wayang-Webhook-Signature", signature,
-                    "Idempotency-Key", ReconciliationSlaWebhookSupport.idempotencyKey(transition));
+                    "Idempotency-Key", ReconciliationSlaWebhookSupport.idempotencyKey(transition),
+                    "X-Wayang-Webhook-Key-Version", safeVersion);
             return transports.get().post(safeEndpoint, headers, body, Duration.ofSeconds(timeoutSeconds));
         } finally {
             if (secret != null) java.util.Arrays.fill(secret, '\0');

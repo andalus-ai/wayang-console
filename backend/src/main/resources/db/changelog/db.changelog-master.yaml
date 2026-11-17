@@ -658,3 +658,14 @@ databaseChangeLog:
       rollback:
         - dropTable: { tableName: wc_reconciliation_webhook_delivery }
         - dropTable: { tableName: wc_reconciliation_webhook_cursor }
+
+  - changeSet:
+      id: 019-webhook-secret-version
+      author: andalus-ai
+      changes:
+        - addColumn:
+            tableName: wc_reconciliation_webhook_delivery
+            columns:
+              - column: { name: last_secret_version, type: VARCHAR(64) }
+      rollback:
+        - dropColumn: { tableName: wc_reconciliation_webhook_delivery, columnName: last_secret_version }
