@@ -691,6 +691,12 @@ class DeploymentReconciliationIntegrationTest {
         var failed = webhookDelivery(org, env, "FAILED", old);
         var pending = webhookDelivery(org, env, "PENDING", old);
         var delivering = webhookDelivery(org, env, "DELIVERING", old);
+        var metrics = webhookSink.operationalMetrics(org, Set.of(env), Instant.now());
+        assertEquals(4L, metrics.accepted());
+        assertEquals(2L, metrics.pending());
+        assertEquals(1L, metrics.delivered());
+        assertEquals(1L, metrics.failed());
+        assertTrue(metrics.oldestPendingAgeSeconds() >= 120L * 86400L - 5L);
         int removed = webhookSink.purgeTerminalBefore(Instant.now().minusSeconds(90L * 86400L), 1);
         assertEquals(1, removed);
         long remainingTerminal = ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity.count(
