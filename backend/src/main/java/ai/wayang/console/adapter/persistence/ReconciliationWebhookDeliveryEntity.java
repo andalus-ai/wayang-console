@@ -31,4 +31,5 @@ public class ReconciliationWebhookDeliveryEntity extends PanacheEntityBase {
     @Column(name = "lease_until") public Instant leaseUntil;
     @Column(name = "delivered_at") public Instant deliveredAt;
     @Column(name = "last_failure_code", length = 80) public String lastFailureCode;
+    @Column(name = "last_secret_version", length = 64) public String lastSecretVersion;
 }
