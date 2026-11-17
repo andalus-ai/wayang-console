@@ -273,7 +273,7 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
                 .getResultStream().findFirst()
                 .orElseThrow(() -> new jakarta.ws.rs.NotFoundException("Webhook delivery was not found"));
         if (!"FAILED".equals(event.status)) {
-            throw new jakarta.ws.rs.ConflictException("Only terminally failed webhook deliveries can be retried");
+            throw new jakarta.ws.rs.WebApplicationException("Only terminally failed webhook deliveries can be retried", jakarta.ws.rs.core.Response.Status.CONFLICT);
         }
         Instant now = Instant.now();
         audit.append(event.organizationId, event.environmentId, actor,
