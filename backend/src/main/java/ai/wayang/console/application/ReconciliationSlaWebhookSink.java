@@ -224,12 +224,12 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
 
     @Transactional
     public DeliveryPage deliveryHistory(UUID organizationId, Set<UUID> environments, int page, int size) {
-        if (page < 0) throw new BadRequestException("page must be zero or greater");
+        if (page < 0) throw new jakarta.ws.rs.BadRequestException("page must be zero or greater");
         if (organizationId == null || environments == null || environments.isEmpty()) {
             return new DeliveryPage(List.of(), 0, page, Math.max(1, Math.min(size, 100)));
         }
         int boundedSize = Math.max(1, Math.min(size, 100));
-        if (page > Integer.MAX_VALUE / boundedSize) throw new BadRequestException("page is too large");
+        if (page > Integer.MAX_VALUE / boundedSize) throw new jakarta.ws.rs.BadRequestException("page is too large");
         long total = entityManager.createQuery("""
                 select count(d) from ReconciliationWebhookDeliveryEntity d
                 where d.organizationId = :organizationId and d.environmentId in :environments
@@ -255,11 +255,11 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
     public DeliveryView retryFailed(UUID organizationId, Set<UUID> environments, UUID deliveryId,
             String actor, String reason) {
         if (organizationId == null || environments == null || environments.isEmpty()) {
-            throw new NotFoundException("Webhook delivery was not found");
+            throw new jakarta.ws.rs.NotFoundException("Webhook delivery was not found");
         }
-        if (deliveryId == null) throw new BadRequestException("deliveryId is required");
+        if (deliveryId == null) throw new jakarta.ws.rs.BadRequestException("deliveryId is required");
         if (reason == null || reason.isBlank() || reason.trim().length() > 500) {
-            throw new BadRequestException("A retry reason between 1 and 500 characters is required");
+            throw new jakarta.ws.rs.BadRequestException("A retry reason between 1 and 500 characters is required");
         }
         ReconciliationWebhookDeliveryEntity event = entityManager.createQuery("""
                 select d from ReconciliationWebhookDeliveryEntity d
@@ -271,9 +271,9 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
                 .setParameter("environments", environments)
                 .setLockMode(LockModeType.PESSIMISTIC_WRITE)
                 .getResultStream().findFirst()
-                .orElseThrow(() -> new NotFoundException("Webhook delivery was not found"));
+                .orElseThrow(() -> new jakarta.ws.rs.NotFoundException("Webhook delivery was not found"));
         if (!"FAILED".equals(event.status)) {
-            throw new ConflictException("Only terminally failed webhook deliveries can be retried");
+            throw new jakarta.ws.rs.ConflictException("Only terminally failed webhook deliveries can be retried");
         }
         Instant now = Instant.now();
         audit.append(event.organizationId, event.environmentId, actor,
