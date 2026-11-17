@@ -314,15 +314,14 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
         DeliveryStatus current = status(organizationId, environments);
         long oldestAge = current.oldestPendingAt() == null ? 0L
                 : Math.max(0L, java.time.Duration.between(current.oldestPendingAt(), now).getSeconds());
-        Number average = (Number) entityManager.createNativeQuery("""
+        var latencyQuery = entityManager.createNativeQuery("""
                 select coalesce(avg(extract(epoch from (delivered_at - created_at))), 0)
                 from wc_reconciliation_webhook_delivery
                 where organization_id = :organizationId and environment_id in (:environments)
                   and delivery_status = 'DELIVERED' and delivered_at is not null
-                """)
-                .setParameter("organizationId", organizationId)
-                .setParameter("environments", environments)
-                .getSingleResult();
+                """).unwrap(org.hibernate.query.NativeQuery.class);
+        Number average = (Number) latencyQuery.setParameter("organizationId", organizationId)
+                .setParameterList("environments", environments).getSingleResult();
         return new WebhookOperationalMetrics(current.accepted(), current.pending(), current.delivered(),
                 current.failed(), oldestAge, average.doubleValue(), current.lastDeliveredAt(),
                 current.lastFailureAt(), current.health());
