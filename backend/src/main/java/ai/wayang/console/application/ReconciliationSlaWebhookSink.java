@@ -27,6 +27,7 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
     private static final long MAX_BACKOFF_SECONDS = 3600;
 
     @Inject EntityManager entityManager;
+    @Inject AuditIntegrityService audit;
 
     @Override
     public String sinkId() {
@@ -212,6 +213,89 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
             event.status = "FAILED";
             event.nextAttemptAt = null;
         }
+    }
+
+
+    public record DeliveryView(UUID id, long auditSequence, UUID deploymentId, String fromStatus,
+            String toStatus, Instant occurredAt, String status, int attemptCount, Instant createdAt,
+            Instant nextAttemptAt, Instant lastAttemptAt, Instant deliveredAt, String failureCode) {}
+
+    public record DeliveryPage(List<DeliveryView> items, long total, int page, int size) {}
+
+    @Transactional
+    public DeliveryPage deliveryHistory(UUID organizationId, Set<UUID> environments, int page, int size) {
+        if (page < 0) throw new BadRequestException("page must be zero or greater");
+        if (organizationId == null || environments == null || environments.isEmpty()) {
+            return new DeliveryPage(List.of(), 0, page, Math.max(1, Math.min(size, 100)));
+        }
+        int boundedSize = Math.max(1, Math.min(size, 100));
+        long total = entityManager.createQuery("""
+                select count(d) from ReconciliationWebhookDeliveryEntity d
+                where d.organizationId = :organizationId and d.environmentId in :environments
+                """, Long.class)
+                .setParameter("organizationId", organizationId)
+                .setParameter("environments", environments)
+                .getSingleResult();
+        List<ReconciliationWebhookDeliveryEntity> rows = entityManager.createQuery("""
+                select d from ReconciliationWebhookDeliveryEntity d
+                where d.organizationId = :organizationId and d.environmentId in :environments
+                order by d.createdAt desc, d.auditSequence desc
+                """, ReconciliationWebhookDeliveryEntity.class)
+                .setParameter("organizationId", organizationId)
+                .setParameter("environments", environments)
+                .setFirstResult(Math.multiplyExact(page, boundedSize))
+                .setMaxResults(boundedSize)
+                .getResultList();
+        return new DeliveryPage(rows.stream().map(ReconciliationSlaWebhookSink::view).toList(),
+                total, page, boundedSize);
+    }
+
+    @Transactional
+    public DeliveryView retryFailed(UUID organizationId, Set<UUID> environments, UUID deliveryId,
+            String actor, String reason) {
+        if (organizationId == null || environments == null || environments.isEmpty()) {
+            throw new NotFoundException("Webhook delivery was not found");
+        }
+        if (deliveryId == null) throw new BadRequestException("deliveryId is required");
+        if (reason == null || reason.isBlank() || reason.trim().length() > 500) {
+            throw new BadRequestException("A retry reason between 1 and 500 characters is required");
+        }
+        ReconciliationWebhookDeliveryEntity event = entityManager.createQuery("""
+                select d from ReconciliationWebhookDeliveryEntity d
+                where d.id = :id and d.organizationId = :organizationId
+                  and d.environmentId in :environments
+                """, ReconciliationWebhookDeliveryEntity.class)
+                .setParameter("id", deliveryId)
+                .setParameter("organizationId", organizationId)
+                .setParameter("environments", environments)
+                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                .getResultStream().findFirst()
+                .orElseThrow(() -> new NotFoundException("Webhook delivery was not found"));
+        if (!"FAILED".equals(event.status)) {
+            throw new ConflictException("Only terminally failed webhook deliveries can be retried");
+        }
+        Instant now = Instant.now();
+        audit.append(event.organizationId, event.environmentId, actor,
+                "RECONCILIATION_WEBHOOK_RETRY_REQUESTED", "WEBHOOK_DELIVERY",
+                event.id.toString(), now, "SUCCESS");
+        // Preserve the original audit identity/idempotency key. This is a new delivery attempt,
+        // not a new accepted event and must not move the provider's acceptance cursor.
+        event.status = "PENDING";
+        event.attemptCount = 0;
+        event.nextAttemptAt = now;
+        event.lastAttemptAt = null;
+        event.leaseUntil = null;
+        event.deliveredAt = null;
+        event.lastFailureCode = null;
+        entityManager.flush();
+        return view(event);
+    }
+
+    private static DeliveryView view(ReconciliationWebhookDeliveryEntity event) {
+        return new DeliveryView(event.id, event.auditSequence, event.deploymentId,
+                event.fromStatus, event.toStatus, event.occurredAt, event.status,
+                event.attemptCount, event.createdAt, event.nextAttemptAt, event.lastAttemptAt,
+                event.deliveredAt, event.lastFailureCode);
     }
 
     public record DeliveryClaim(UUID id, UUID organizationId, UUID environmentId, UUID deploymentId,
