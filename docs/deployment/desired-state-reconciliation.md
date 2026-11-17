@@ -313,3 +313,18 @@ The endpoint host must also appear exactly in `wayang.console.reconciliation.sla
 Do not place secret values in `application.properties`, source control, operator API requests, destination URLs, or logs. Inject them from an orchestrator secret or a dedicated secret-manager ConfigSource and rotate them using that system's controls. Destination configuration is organization/environment scoped; no destination is shared implicitly between tenants.
 
 The provider delivery tables are extension-owned persistence, not a second Console outbox: they exist only to satisfy this sink's durable acceptance, retry, lease, and status contract. Runtime execution and reconciliation remain independent of webhook delivery.
+
+
+## M1.10.17 — webhook operator recovery and delivery history
+
+The built-in HTTPS SLA webhook provider now exposes a paginated, authenticated operator view of delivery records:
+
+`GET /api/v1/console/deployments/reconciliation/sla/webhook/deliveries?page=0&size=25`
+
+The response is scoped to the authenticated operator's organization and visible environments. It includes the original audit sequence, deployment, transition, delivery state, attempt count, timestamps, and bounded failure code. It does not expose destination URLs, secret references, secret material, or raw transport exception messages. Page size is capped at 100.
+
+A terminally failed event can be retried by an administrator:
+
+`POST /api/v1/console/deployments/reconciliation/sla/webhook/deliveries/{deliveryId}/retry`
+
+The request requires a reason (1–500 characters). The Console locks and scopes the delivery row, accepts only `FAILED`, and appends `RECONCILIATION_WEBHOOK_RETRY_REQUESTED` to the existing tamper-evident audit chain in the same transaction. It returns the same event to `PENDING`, clears the prior lease/failure state, and resets the attempt counter so the existing worker can retry immediately. The original audit sequence, record hash, delivery ID, and provider acceptance cursor are unchanged; the operation does not manufacture a new alert event or bypass the existing worker/transport policy. Non-terminal events return HTTP 409, and out-of-scope or unknown event IDs return HTTP 404.
