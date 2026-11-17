@@ -675,9 +675,10 @@ class DeploymentReconciliationIntegrationTest {
         assertThrows(jakarta.ws.rs.NotFoundException.class,
                 () -> webhookSink.retryFailed(org, Set.of(otherEnv), event.id,
                         "test-operator", "Must not cross environment scope"));
-        assertThrows(jakarta.ws.rs.ConflictException.class,
+        var conflict = assertThrows(jakarta.ws.rs.WebApplicationException.class,
                 () -> webhookSink.retryFailed(org, Set.of(env), event.id,
                         "test-operator", "A second retry requires another terminal failure"));
+        assertEquals(409, conflict.getResponse().getStatus());
     }
 
 }
