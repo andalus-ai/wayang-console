@@ -218,7 +218,12 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
 
     public record DeliveryView(UUID id, long auditSequence, UUID deploymentId, String fromStatus,
             String toStatus, Instant occurredAt, String status, int attemptCount, Instant createdAt,
-            Instant nextAttemptAt, Instant lastAttemptAt, Instant deliveredAt, String failureCode) {}
+            Instant nextAttemptAt, Instant lastAttemptAt, Instant deliveredAt, String failureCode,
+            String secretVersion) {}
+
+    public record WebhookOperationalMetrics(long accepted, long pending, long delivered, long failed,
+            long oldestPendingAgeSeconds, double averageDeliveryLatencySeconds,
+            Instant lastDeliveredAt, Instant lastFailureAt, String health) {}
 
     public record DeliveryPage(List<DeliveryView> items, long total, int page, int size) {}
 
@@ -292,18 +297,68 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
         return view(event);
     }
 
+    @Transactional
+    public void recordSecretVersion(DeliveryClaim claim, String secretVersion) {
+        String safeVersion = ReconciliationSlaWebhookSupport.validateSecretVersion(secretVersion);
+        ReconciliationWebhookDeliveryEntity event = entityManager.find(
+                ReconciliationWebhookDeliveryEntity.class, claim.id(), LockModeType.PESSIMISTIC_WRITE);
+        if (!ownsLease(event, claim)) return;
+        event.lastSecretVersion = safeVersion;
+    }
+
+    @Transactional
+    public WebhookOperationalMetrics operationalMetrics(UUID organizationId, Set<UUID> environments, Instant now) {
+        if (organizationId == null || environments == null || environments.isEmpty()) {
+            return new WebhookOperationalMetrics(0, 0, 0, 0, 0, 0d, null, null, "HEALTHY");
+        }
+        DeliveryStatus current = status(organizationId, environments);
+        long oldestAge = current.oldestPendingAt() == null ? 0L
+                : Math.max(0L, java.time.Duration.between(current.oldestPendingAt(), now).getSeconds());
+        Number average = (Number) entityManager.createNativeQuery("""
+                select coalesce(avg(extract(epoch from (delivered_at - created_at))), 0)
+                from wc_reconciliation_webhook_delivery
+                where organization_id = :organizationId and environment_id in (:environments)
+                  and delivery_status = 'DELIVERED' and delivered_at is not null
+                """)
+                .setParameter("organizationId", organizationId)
+                .setParameter("environments", environments)
+                .getSingleResult();
+        return new WebhookOperationalMetrics(current.accepted(), current.pending(), current.delivered(),
+                current.failed(), oldestAge, average.doubleValue(), current.lastDeliveredAt(),
+                current.lastFailureAt(), current.health());
+    }
+
+    @Transactional
+    public int purgeTerminalBefore(Instant cutoff, int limit) {
+        if (cutoff == null) throw new IllegalArgumentException("A retention cutoff is required");
+        int bounded = Math.max(1, Math.min(limit, 1000));
+        List<ReconciliationWebhookDeliveryEntity> expired = entityManager.createQuery("""
+                select d from ReconciliationWebhookDeliveryEntity d
+                where (d.status = 'DELIVERED' and d.deliveredAt < :cutoff)
+                   or (d.status = 'FAILED' and d.lastAttemptAt < :cutoff)
+                order by d.createdAt asc
+                """, ReconciliationWebhookDeliveryEntity.class)
+                .setParameter("cutoff", cutoff)
+                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                .setMaxResults(bounded)
+                .getResultList();
+        expired.forEach(entityManager::remove);
+        entityManager.flush();
+        return expired.size();
+    }
+
     private static DeliveryView view(ReconciliationWebhookDeliveryEntity event) {
         return new DeliveryView(event.id, event.auditSequence, event.deploymentId,
                 event.fromStatus, event.toStatus, event.occurredAt, event.status,
                 event.attemptCount, event.createdAt, event.nextAttemptAt, event.lastAttemptAt,
-                event.deliveredAt, event.lastFailureCode);
+                event.deliveredAt, event.lastFailureCode, event.lastSecretVersion);
     }
 
     public record DeliveryClaim(UUID id, UUID organizationId, UUID environmentId, UUID deploymentId,
             String fromStatus, String toStatus, Instant occurredAt, long auditSequence,
             String recordHash, int attempt, Instant leaseUntil) {}
 
-    public record Destination(URI endpoint, String secretReference) {}
+    public record Destination(URI endpoint, String secretReference, String secretVersion) {}
 
     public static long backoffSeconds(int attempt) {
         int exponent = Math.max(0, Math.min(attempt - 1, 10));
@@ -355,7 +410,9 @@ public class ReconciliationSlaWebhookSink implements ReconciliationSlaAlertSink 
         if (!secretReference.matches("[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}")) {
             throw new IllegalStateException("Webhook secret reference is invalid");
         }
-        return new Destination(uri, secretReference);
+        String secretVersion = config.getOptionalValue(prefix + ".secret-version", String.class).orElse("legacy");
+        secretVersion = ReconciliationSlaWebhookSupport.validateSecretVersion(secretVersion);
+        return new Destination(uri, secretReference, secretVersion);
     }
 
     private static String safeFailureCode(String value) {
