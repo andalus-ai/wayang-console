@@ -165,10 +165,10 @@ public class DeploymentReconciliationResource {
                 "Terminally failed webhook deliveries retained by the provider.", webhook.failed());
         appendGauge(out, "wayang_console_reconciliation_webhook_oldest_pending_age_seconds",
                 "Age of the oldest pending webhook delivery.", webhook.oldestPendingAgeSeconds());
-        out.append("# HELP wayang_console_reconciliation_webhook_average_delivery_latency_seconds Average delivery latency for retained successful webhook deliveries.\\n")
-                .append("# TYPE wayang_console_reconciliation_webhook_average_delivery_latency_seconds gauge\\n")
+        out.append("# HELP wayang_console_reconciliation_webhook_average_delivery_latency_seconds Average delivery latency for retained successful webhook deliveries.\n")
+                .append("# TYPE wayang_console_reconciliation_webhook_average_delivery_latency_seconds gauge\n")
                 .append("wayang_console_reconciliation_webhook_average_delivery_latency_seconds ")
-                .append(String.format(java.util.Locale.ROOT, "%.3f", webhook.averageDeliveryLatencySeconds())).append('\\n');
+                .append(String.format(java.util.Locale.ROOT, "%.3f", webhook.averageDeliveryLatencySeconds())).append('\n');
         return Response.ok(out.toString(), "text/plain; version=0.0.4; charset=utf-8")
                 .header("Cache-Control", "no-store")
                 .build();
