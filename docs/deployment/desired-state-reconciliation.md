@@ -328,3 +328,17 @@ A terminally failed event can be retried by an administrator:
 `POST /api/v1/console/deployments/reconciliation/sla/webhook/deliveries/{deliveryId}/retry`
 
 The request requires a reason (1–500 characters). The Console locks and scopes the delivery row, accepts only `FAILED`, and appends `RECONCILIATION_WEBHOOK_RETRY_REQUESTED` to the existing tamper-evident audit chain in the same transaction. It returns the same event to `PENDING`, clears the prior lease/failure state, and resets the attempt counter so the existing worker can retry immediately. The original audit sequence, record hash, delivery ID, and provider acceptance cursor are unchanged; the operation does not manufacture a new alert event or bypass the existing worker/transport policy. Non-terminal events return HTTP 409, and out-of-scope or unknown event IDs return HTTP 404.
+
+
+## M1.10.18 — webhook operations and lifecycle management
+
+Operational visibility is available to authenticated operators at:
+
+- `GET /api/v1/console/deployments/reconciliation/sla/webhook/metrics`
+- The existing `GET /api/v1/console/deployments/reconciliation/sla/metrics/prometheus` exposition now includes webhook accepted, pending, delivered, failed, oldest-pending-age, and average delivery-latency gauges.
+
+Metrics are calculated only over the operator's organization and visible environments. Prometheus output contains no organization, environment, deployment, runtime, or user labels. Average delivery latency is computed from retained successful delivery rows.
+
+Webhook destinations may define an opaque `secret-version` alongside `secret-reference`. The version is sent as `X-Wayang-Webhook-Key-Version` and recorded as the last version used for each delivery. It is an identifier only, never key material. Rotate a key by publishing the new secret under a new reference, changing the configured reference and version together, and arranging receiver-side overlap for old/new versions while in-flight requests finish. Pending retries resolve the current destination at attempt time, so they use the newly configured key.
+
+Terminal delivery history is retained for 90 days by default. A daily bounded cleanup removes only old `DELIVERED` and `FAILED` provider rows (maximum 500 per run by default). `PENDING` and `DELIVERING` records are never eligible. The provider cursor and tamper-evident audit chain are not deleted; retention applies only to operational delivery detail. Retention is configurable with `WAYANG_CONSOLE_SLA_WEBHOOK_RETENTION_DAYS` (7–3650) and `WAYANG_CONSOLE_SLA_WEBHOOK_RETENTION_BATCH_SIZE` (1–1000).
