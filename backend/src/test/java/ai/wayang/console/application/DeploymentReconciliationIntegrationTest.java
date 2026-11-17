@@ -681,4 +681,47 @@ class DeploymentReconciliationIntegrationTest {
         assertEquals(409, conflict.getResponse().getStatus());
     }
 
+
+    @Test
+    @TestTransaction
+    void webhookRetentionRemovesOnlyOldTerminalRowsInBoundedBatches() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID();
+        Instant old = Instant.now().minusSeconds(120L * 86400L);
+        var delivered = webhookDelivery(org, env, "DELIVERED", old);
+        var failed = webhookDelivery(org, env, "FAILED", old);
+        var pending = webhookDelivery(org, env, "PENDING", old);
+        var delivering = webhookDelivery(org, env, "DELIVERING", old);
+        int removed = webhookSink.purgeTerminalBefore(Instant.now().minusSeconds(90L * 86400L), 1);
+        assertEquals(1, removed);
+        long remainingTerminal = ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity.count(
+                "id = ?1", delivered.id) + ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity.count(
+                "id = ?1", failed.id);
+        assertEquals(1L, remainingTerminal);
+        assertEquals(1L, ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity.count("id = ?1", pending.id));
+        assertEquals(1L, ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity.count("id = ?1", delivering.id));
+        assertEquals(1, webhookSink.purgeTerminalBefore(Instant.now().minusSeconds(90L * 86400L), 10));
+    }
+
+    private static ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity webhookDelivery(
+            UUID org, UUID env, String status, Instant createdAt) {
+        var event = new ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity();
+        event.id = UUID.randomUUID();
+        event.organizationId = org;
+        event.environmentId = env;
+        event.auditSequence = Math.abs(UUID.randomUUID().getLeastSignificantBits()) + 1L;
+        event.recordHash = java.util.UUID.randomUUID().toString().replace("-", "").repeat(2);
+        event.deploymentId = UUID.randomUUID();
+        event.fromStatus = "WARNING";
+        event.toStatus = "CRITICAL";
+        event.occurredAt = createdAt;
+        event.status = status;
+        event.attemptCount = status.equals("FAILED") ? 10 : 1;
+        event.createdAt = createdAt;
+        event.deliveredAt = status.equals("DELIVERED") ? createdAt : null;
+        event.lastAttemptAt = status.equals("FAILED") ? createdAt : null;
+        event.leaseUntil = status.equals("DELIVERING") ? Instant.now().plusSeconds(60) : null;
+        event.persist();
+        return event;
+    }
+
 }
