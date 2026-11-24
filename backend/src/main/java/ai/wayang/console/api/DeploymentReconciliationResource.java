@@ -2,11 +2,14 @@ package ai.wayang.console.api;
 
 import ai.wayang.console.application.DeploymentReconciliationService;
 import ai.wayang.console.application.RuntimeCommandService;
+import ai.wayang.console.application.ReconciliationSlaAlertDispatcher;
+import ai.wayang.console.application.ReconciliationSlaWebhookSink;
 import ai.wayang.console.security.ConsoleOperatorContext;
 import io.quarkus.security.Authenticated;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.util.UUID;
 import jakarta.ws.rs.DefaultValue;
 import jakarta.ws.rs.QueryParam;
@@ -19,6 +22,8 @@ public class DeploymentReconciliationResource {
     @Inject ConsoleOperatorContext operator;
     @Inject DeploymentReconciliationService reconciliation;
     @Inject RuntimeCommandService commands;
+    @Inject ReconciliationSlaAlertDispatcher alertDispatcher;
+    @Inject ReconciliationSlaWebhookSink webhookSink;
 
     public record DesiredStateRequest(String desiredState) {}
 
@@ -50,6 +55,138 @@ public class DeploymentReconciliationResource {
         operator.requireRead();
         return reconciliation.fleetSummary(operator.organizationId(), operator.environmentIds(),
                 java.time.Instant.now());
+    }
+
+    @GET
+    @Path("/reconciliation/health")
+    public DeploymentReconciliationService.ReconciliationHealth reconciliationHealth() {
+        operator.requireRead();
+        return reconciliation.reconciliationHealth(operator.organizationId(), operator.environmentIds(),
+                java.time.Instant.now());
+    }
+
+    @GET
+    @Path("/reconciliation/sla/alert-policy")
+    public DeploymentReconciliationService.SlaAlertPolicy reconciliationSlaAlertPolicy() {
+        operator.requireRead();
+        return reconciliation.reconciliationSlaAlertPolicy();
+    }
+
+    @GET
+    @Path("/reconciliation/sla/delivery")
+    public java.util.List<ReconciliationSlaAlertDispatcher.AlertSinkStatus> reconciliationSlaAlertDelivery() {
+        operator.requireRead();
+        return alertDispatcher.deliveryStatuses(operator.organizationId(), operator.environmentIds());
+    }
+
+
+    @GET
+    @Path("/reconciliation/sla/webhook/metrics")
+    public ReconciliationSlaWebhookSink.WebhookOperationalMetrics reconciliationSlaWebhookMetrics() {
+        operator.requireRead();
+        return webhookSink.operationalMetrics(operator.organizationId(), operator.environmentIds(),
+                java.time.Instant.now());
+    }
+
+    @GET
+    @Path("/reconciliation/sla/webhook/deliveries")
+    public ReconciliationSlaWebhookSink.DeliveryPage reconciliationSlaWebhookDeliveries(
+            @QueryParam("page") @DefaultValue("0") int page,
+            @QueryParam("size") @DefaultValue("25") int size) {
+        operator.requireRead();
+        return webhookSink.deliveryHistory(operator.organizationId(), operator.environmentIds(), page, size);
+    }
+
+    public record WebhookDeliveryRetryRequest(String reason) {}
+
+    @POST
+    @Path("/reconciliation/sla/webhook/deliveries/{deliveryId}/retry")
+    public ReconciliationSlaWebhookSink.DeliveryView retryReconciliationSlaWebhookDelivery(
+            @PathParam("deliveryId") UUID deliveryId, WebhookDeliveryRetryRequest request) {
+        operator.requireAdmin();
+        if (request == null) throw new BadRequestException("Request body is required");
+        return webhookSink.retryFailed(operator.organizationId(), operator.environmentIds(),
+                deliveryId, operator.subject(), request.reason());
+    }
+
+    @GET
+    @Path("/reconciliation/sla/metrics")
+    public DeploymentReconciliationService.ReconciliationSlaMetrics reconciliationSlaMetrics() {
+        operator.requireRead();
+        return reconciliation.reconciliationSlaMetrics(operator.organizationId(), operator.environmentIds(),
+                java.time.Instant.now());
+    }
+
+    /**
+     * Prometheus text exposition for the authenticated operator's scope.
+     * No tenant, environment, deployment, runtime, or user identifiers are emitted as labels.
+     */
+    @GET
+    @Path("/reconciliation/sla/metrics/prometheus")
+    @Produces("text/plain; version=0.0.4; charset=utf-8")
+    public Response reconciliationSlaPrometheusMetrics() {
+        operator.requireRead();
+        var metrics = reconciliation.reconciliationSlaMetrics(operator.organizationId(),
+                operator.environmentIds(), java.time.Instant.now());
+        StringBuilder out = new StringBuilder(2048);
+        appendGauge(out, "wayang_console_reconciliation_unresolved",
+                "Unresolved deployment reconciliations in the authenticated scope.", metrics.unresolved());
+        appendGauge(out, "wayang_console_reconciliation_fresh",
+                "Unresolved reconciliations below the warning SLA threshold.", metrics.fresh());
+        appendGauge(out, "wayang_console_reconciliation_warning",
+                "Unresolved reconciliations in the warning SLA band.", metrics.warning());
+        appendGauge(out, "wayang_console_reconciliation_critical",
+                "Unresolved reconciliations in the critical SLA band.", metrics.critical());
+        appendGauge(out, "wayang_console_reconciliation_sla_warning_threshold_seconds",
+                "Configured warning threshold in seconds.", metrics.warningThresholdSeconds());
+        appendGauge(out, "wayang_console_reconciliation_sla_critical_threshold_seconds",
+                "Configured critical threshold in seconds.", metrics.criticalThresholdSeconds());
+        out.append("# HELP wayang_console_reconciliation_sla_transitions_total Append-only SLA transition events by destination state.\n")
+                .append("# TYPE wayang_console_reconciliation_sla_transitions_total counter\n")
+                .append("wayang_console_reconciliation_sla_transitions_total{to_status=\"HEALTHY\"} ")
+                .append(metrics.transitionsToHealthy()).append('\n')
+                .append("wayang_console_reconciliation_sla_transitions_total{to_status=\"WARNING\"} ")
+                .append(metrics.transitionsToWarning()).append('\n')
+                .append("wayang_console_reconciliation_sla_transitions_total{to_status=\"CRITICAL\"} ")
+                .append(metrics.transitionsToCritical()).append('\n');
+        out.append("# HELP wayang_console_reconciliation_sla_policy_info Active SLA policy version.\n")
+                .append("# TYPE wayang_console_reconciliation_sla_policy_info gauge\n")
+                .append("wayang_console_reconciliation_sla_policy_info{version=\"")
+                .append(metrics.policyVersion()).append("\"} 1\n");
+        var webhook = webhookSink.operationalMetrics(operator.organizationId(),
+                operator.environmentIds(), java.time.Instant.now());
+        appendGauge(out, "wayang_console_reconciliation_webhook_accepted",
+                "Accepted webhook deliveries retained by the provider.", webhook.accepted());
+        appendGauge(out, "wayang_console_reconciliation_webhook_pending",
+                "Pending and leased webhook deliveries.", webhook.pending());
+        appendGauge(out, "wayang_console_reconciliation_webhook_delivered",
+                "Successfully delivered webhook events retained by the provider.", webhook.delivered());
+        appendGauge(out, "wayang_console_reconciliation_webhook_failed",
+                "Terminally failed webhook deliveries retained by the provider.", webhook.failed());
+        appendGauge(out, "wayang_console_reconciliation_webhook_oldest_pending_age_seconds",
+                "Age of the oldest pending webhook delivery.", webhook.oldestPendingAgeSeconds());
+        out.append("# HELP wayang_console_reconciliation_webhook_average_delivery_latency_seconds Average delivery latency for retained successful webhook deliveries.\n")
+                .append("# TYPE wayang_console_reconciliation_webhook_average_delivery_latency_seconds gauge\n")
+                .append("wayang_console_reconciliation_webhook_average_delivery_latency_seconds ")
+                .append(String.format(java.util.Locale.ROOT, "%.3f", webhook.averageDeliveryLatencySeconds())).append('\n');
+        return Response.ok(out.toString(), "text/plain; version=0.0.4; charset=utf-8")
+                .header("Cache-Control", "no-store")
+                .build();
+    }
+
+    private static void appendGauge(StringBuilder out, String name, String help, long value) {
+        out.append("# HELP ").append(name).append(' ').append(help).append('\n')
+                .append("# TYPE ").append(name).append(" gauge\n")
+                .append(name).append(' ').append(value).append('\n');
+    }
+
+    @GET
+    @Path("/reconciliation/sla/history")
+    public DeploymentReconciliationService.SlaTransitionPage reconciliationSlaHistory(
+            @QueryParam("page") @DefaultValue("0") int page,
+            @QueryParam("size") @DefaultValue("25") int size) {
+        operator.requireRead();
+        return reconciliation.slaHistory(operator.organizationId(), operator.environmentIds(), page, size);
     }
 
     @GET

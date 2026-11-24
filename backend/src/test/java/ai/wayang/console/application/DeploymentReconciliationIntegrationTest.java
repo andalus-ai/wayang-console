@@ -23,6 +23,113 @@ class DeploymentReconciliationIntegrationTest {
     @Inject RuntimeInventoryService inventory;
     @Inject RuntimeCommandService commands;
     @Inject AuditIntegrityService audit;
+    @Inject ReconciliationSlaAlertDispatcher alertDispatcher;
+    @Inject TestReconciliationSlaAlertSink testAlertSink;
+    @Inject ReconciliationSlaWebhookSink webhookSink;
+
+    @Test
+    @TestTransaction
+    void slaAlertPolicyIsOptInByDefault() {
+        var policy = reconciliation.reconciliationSlaAlertPolicy();
+        assertFalse(policy.warningEnabled());
+        assertFalse(policy.criticalEnabled());
+        assertFalse(policy.recoveryEnabled());
+        assertEquals("AUDIT_REPLAY_WITH_PROVIDER_OWNED_DURABLE_DELIVERY", policy.deliveryMode());
+    }
+
+    @Test
+    @TestTransaction
+    void disabledSlaAlertPolicyDoesNotCreateDeliveryIntent() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "alert-disabled-" + UUID.randomUUID(),
+                "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "9".repeat(64);
+        var deployment = deployments.create(org, Set.of(env), runtime.id(),
+                "alert-disabled-" + UUID.randomUUID(), "alerts.flow", "1.0.0",
+                digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), deployment.id(), "PRESENT", "test-operator");
+        var row = DeploymentReconciliationEntity.<DeploymentReconciliationEntity>find(
+                "deploymentId", deployment.id()).firstResult();
+        Instant now = Instant.now();
+        row.updatedAt = now.minus(Duration.ofMinutes(10));
+        row.persist();
+
+        assertEquals(1, reconciliation.evaluateSlaTransitions(now));
+        assertEquals(0L, ai.wayang.console.adapter.persistence.AuditRecordEntity.count(
+                "organizationId = ?1 and environmentId = ?2 and action like ?3",
+                org, env, "RECONCILIATION_ALERT_%"));
+        assertEquals(1L, ai.wayang.console.adapter.persistence.AuditRecordEntity.count(
+                "organizationId = ?1 and environmentId = ?2 and action like ?3",
+                org, env, "RECONCILIATION_SLA_%_TO_WARNING"));
+    }
+
+    @Test
+    @TestTransaction
+    void alertIntentReplaysInOrderAndProviderCursorMakesReplayIdempotent() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID(), deploymentId = UUID.randomUUID();
+        var alert = audit.append(org, env, "console:test", "RECONCILIATION_ALERT_WARNING_TO_CRITICAL",
+                "DEPLOYMENT", deploymentId.toString(), Instant.now(), "SUCCESS");
+
+        assertEquals(1, alertDispatcher.replayPendingTransitions());
+        assertEquals(0, alertDispatcher.replayPendingTransitions());
+        assertEquals(alert.sequenceNo.longValue(), testAlertSink.lastAcceptedSequence(org, env));
+        var status = testAlertSink.status(org, Set.of(env));
+        assertEquals(1L, status.accepted());
+        assertEquals(1L, status.delivered());
+        assertEquals(0L, status.pending());
+        assertEquals("HEALTHY", status.health());
+    }
+
+
+    @Test
+    @TestTransaction
+    void durableWebhookSinkAcceptsIdempotentlyAndTracksDelivery() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID(), deploymentId = UUID.randomUUID();
+        String prefix = "wayang.console.reconciliation.sla.webhook.destinations." + org + "." + env;
+        String previousAllowed = System.getProperty("wayang.console.reconciliation.sla.webhook.allowed-hosts");
+        String previousEndpoint = System.getProperty(prefix + ".endpoint");
+        String previousSecret = System.getProperty(prefix + ".secret-reference");
+        try {
+            System.setProperty("wayang.console.reconciliation.sla.webhook.allowed-hosts", "alerts.example.com");
+            System.setProperty(prefix + ".endpoint", "https://alerts.example.com/hooks/wayang");
+            System.setProperty(prefix + ".secret-reference", "env:WAYANG_TEST_WEBHOOK_SECRET");
+            var transition = new DeploymentReconciliationService.SlaAlertTransition(
+                    org, env, deploymentId, "WARNING", "CRITICAL",
+                    Instant.parse("2026-11-16T00:00:00Z"), "console:test", 42L, "test-record-hash");
+
+            assertEquals(0L, webhookSink.lastAcceptedSequence(org, env));
+            webhookSink.accept(transition, 0L);
+            assertEquals(42L, webhookSink.lastAcceptedSequence(org, env));
+            webhookSink.accept(transition, 0L); // same audit hash is an idempotent acceptance
+            assertEquals(1L, ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity.count(
+                    "organizationId = ?1 and environmentId = ?2", org, env));
+            assertThrows(IllegalStateException.class, () -> webhookSink.accept(
+                    new DeploymentReconciliationService.SlaAlertTransition(
+                            org, env, UUID.randomUUID(), "CRITICAL", "HEALTHY",
+                            Instant.now(), "console:test", 43L, "next-hash"), 0L));
+
+            var claims = webhookSink.claimDue(Instant.now().plusSeconds(1), 10);
+            assertEquals(1, claims.size());
+            webhookSink.complete(claims.get(0), new ReconciliationSlaWebhookTransport.Response(204));
+            var status = webhookSink.status(org, Set.of(env));
+            assertEquals(1L, status.accepted());
+            assertEquals(0L, status.pending());
+            assertEquals(1L, status.delivered());
+            assertEquals(0L, status.failed());
+            assertEquals("HEALTHY", status.health());
+        } finally {
+            restoreProperty("wayang.console.reconciliation.sla.webhook.allowed-hosts", previousAllowed);
+            restoreProperty(prefix + ".endpoint", previousEndpoint);
+            restoreProperty(prefix + ".secret-reference", previousSecret);
+        }
+    }
+
+    private static void restoreProperty(String key, String previous) {
+        if (previous == null) System.clearProperty(key);
+        else System.setProperty(key, previous);
+    }
 
     @Test
     @TestTransaction
@@ -259,6 +366,56 @@ class DeploymentReconciliationIntegrationTest {
 
     @Test
     @TestTransaction
+    void reconciliationHealthClassifiesAgeBandsWithinAuthenticatedScope() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID(), outsideEnv = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "sla-health-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "8".repeat(64);
+        var fresh = deployments.create(org, Set.of(env), runtime.id(), "sla-fresh-" + UUID.randomUUID(),
+                "fresh.flow", "1.0.0", digest, digest, "test-operator");
+        var warning = deployments.create(org, Set.of(env), runtime.id(), "sla-warning-" + UUID.randomUUID(),
+                "warning.flow", "1.0.0", digest, digest, "test-operator");
+        var critical = deployments.create(org, Set.of(env), runtime.id(), "sla-critical-" + UUID.randomUUID(),
+                "critical.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), fresh.id(), "PRESENT", "test-operator");
+        reconciliation.setDesired(org, Set.of(env), warning.id(), "PRESENT", "test-operator");
+        reconciliation.setDesired(org, Set.of(env), critical.id(), "PRESENT", "test-operator");
+
+        Instant now = Instant.now();
+        DeploymentReconciliationEntity freshRow = DeploymentReconciliationEntity.find("deploymentId", fresh.id()).firstResult();
+        freshRow.updatedAt = now.minusSeconds(120);
+        freshRow.persist();
+        DeploymentReconciliationEntity warningRow = DeploymentReconciliationEntity.find("deploymentId", warning.id()).firstResult();
+        warningRow.updatedAt = now.minusSeconds(600);
+        warningRow.persist();
+        DeploymentReconciliationEntity criticalRow = DeploymentReconciliationEntity.find("deploymentId", critical.id()).firstResult();
+        criticalRow.updatedAt = now.minusSeconds(1200);
+        criticalRow.persist();
+
+        var outsideEnrollment = registry.issueEnrollmentToken(org, outsideEnv, Duration.ofHours(1));
+        var outsideRegistration = registry.enroll(outsideEnrollment.token(), "sla-outside-" + UUID.randomUUID(),
+                "1.2.0", null, null, null);
+        var outsideRuntime = registry.authenticate(outsideRegistration.registrationToken());
+        var outside = deployments.create(org, Set.of(outsideEnv), outsideRuntime.id(), "sla-outside-" + UUID.randomUUID(),
+                "outside.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(outsideEnv), outside.id(), "PRESENT", "test-operator");
+
+        var health = reconciliation.reconciliationHealth(org, Set.of(env), now);
+        assertEquals("CRITICAL", health.status());
+        assertEquals(3L, health.unresolved());
+        assertEquals(1L, health.fresh());
+        assertEquals(1L, health.warning());
+        assertEquals(1L, health.critical());
+        assertEquals(300L, health.warningThresholdSeconds());
+        assertEquals(900L, health.criticalThresholdSeconds());
+        assertEquals(critical.id(), health.oldestUnresolved().deploymentId());
+        assertEquals(0L, reconciliation.reconciliationHealth(UUID.randomUUID(), Set.of(env), now).unresolved());
+        assertEquals("HEALTHY", reconciliation.reconciliationHealth(org, Set.of(), now).status());
+    }
+
+    @Test
+    @TestTransaction
     void operatorRetryHourlyLimitIsDurableAndReturnsTooManyRequests() {
         UUID org = UUID.randomUUID(), env = UUID.randomUUID();
         var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
@@ -318,6 +475,125 @@ class DeploymentReconciliationIntegrationTest {
 
     @Test
     @TestTransaction
+    void reconciliationSlaMetricsAggregateOnlyAuthenticatedEnvironmentScope() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID(), outsideEnv = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "sla-metrics-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "f".repeat(64);
+        var deployment = deployments.create(org, Set.of(env), runtime.id(), "sla-metrics-" + UUID.randomUUID(),
+                "metrics.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), deployment.id(), "PRESENT", "test-operator");
+        var outsideEnrollment = registry.issueEnrollmentToken(org, outsideEnv, Duration.ofHours(1));
+        var outsideRegistration = registry.enroll(outsideEnrollment.token(),
+                "sla-metrics-outside-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var outsideRuntime = registry.authenticate(outsideRegistration.registrationToken());
+        var outside = deployments.create(org, Set.of(outsideEnv), outsideRuntime.id(),
+                "sla-metrics-outside-" + UUID.randomUUID(), "outside-metrics.flow", "1.0.0",
+                digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(outsideEnv), outside.id(), "PRESENT", "test-operator");
+
+        Instant now = Instant.now();
+        DeploymentReconciliationEntity row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        row.updatedAt = now.minusSeconds(600);
+        row.slaStatus = "WARNING";
+        row.slaEvaluatedAt = now;
+        row.persist();
+        DeploymentReconciliationEntity outsideRow = DeploymentReconciliationEntity.find("deploymentId", outside.id()).firstResult();
+        outsideRow.updatedAt = now.minusSeconds(1200);
+        outsideRow.slaStatus = "CRITICAL";
+        outsideRow.slaEvaluatedAt = now;
+        outsideRow.persist();
+
+        audit.append(org, env, "console:test", "RECONCILIATION_SLA_UNINITIALIZED_TO_WARNING",
+                "DEPLOYMENT", deployment.id().toString(), now, "SUCCESS");
+        audit.append(org, outsideEnv, "console:test", "RECONCILIATION_SLA_UNINITIALIZED_TO_CRITICAL",
+                "DEPLOYMENT", outside.id().toString(), now, "SUCCESS");
+
+        var metrics = reconciliation.reconciliationSlaMetrics(org, Set.of(env), now);
+        assertEquals(1L, metrics.unresolved());
+        assertEquals(0L, metrics.fresh());
+        assertEquals(1L, metrics.warning());
+        assertEquals(0L, metrics.critical());
+        assertEquals(0L, metrics.transitionsToHealthy());
+        assertEquals(1L, metrics.transitionsToWarning());
+        assertEquals(0L, metrics.transitionsToCritical());
+        assertEquals(300L, metrics.warningThresholdSeconds());
+        assertEquals(900L, metrics.criticalThresholdSeconds());
+        assertEquals("config-v1", metrics.policyVersion());
+
+        var empty = reconciliation.reconciliationSlaMetrics(org, Set.of(), now);
+        assertEquals(0L, empty.unresolved());
+        assertEquals(0L, empty.transitionsToWarning());
+    }
+
+    @Test
+    @TestTransaction
+    void reconciliationSlaTransitionsAreDurableDeduplicatedAndScoped() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID(), outsideEnv = UUID.randomUUID();
+        var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
+        var enrolled = registry.enroll(enrollment.token(), "sla-transition-" + UUID.randomUUID(), "1.2.0", null, null, null);
+        var runtime = registry.authenticate(enrolled.registrationToken());
+        String digest = "sha256:" + "d".repeat(64);
+        var deployment = deployments.create(org, Set.of(env), runtime.id(), "sla-transition-" + UUID.randomUUID(),
+                "sla-transition.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(env), deployment.id(), "PRESENT", "test-operator");
+        DeploymentReconciliationEntity row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        Instant now = Instant.now();
+        row.updatedAt = now.minusSeconds(600);
+        row.persist();
+
+        assertEquals(1, reconciliation.evaluateSlaTransitions(now));
+        row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        assertEquals("WARNING", row.slaStatus);
+        assertEquals(now.truncatedTo(ChronoUnit.MICROS), row.slaEvaluatedAt);
+        assertEquals(0, reconciliation.evaluateSlaTransitions(now.plusSeconds(10)));
+
+        row.updatedAt = now.minusSeconds(1200);
+        row.persist();
+        assertEquals(1, reconciliation.evaluateSlaTransitions(now.plusSeconds(20)));
+        row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        assertEquals("CRITICAL", row.slaStatus);
+
+        row.updatedAt = now.plusSeconds(20);
+        row.persist();
+        assertEquals(1, reconciliation.evaluateSlaTransitions(now.plusSeconds(30)));
+        row = DeploymentReconciliationEntity.find("deploymentId", deployment.id()).firstResult();
+        assertEquals("HEALTHY", row.slaStatus);
+
+        var outsideEnrollment = registry.issueEnrollmentToken(org, outsideEnv, Duration.ofHours(1));
+        var outsideRegistration = registry.enroll(outsideEnrollment.token(), "sla-transition-outside-" + UUID.randomUUID(),
+                "1.2.0", null, null, null);
+        var outsideRuntime = registry.authenticate(outsideRegistration.registrationToken());
+        var outside = deployments.create(org, Set.of(outsideEnv), outsideRuntime.id(),
+                "sla-transition-outside-" + UUID.randomUUID(), "outside.flow", "1.0.0", digest, digest, "test-operator");
+        reconciliation.setDesired(org, Set.of(outsideEnv), outside.id(), "PRESENT", "test-operator");
+        DeploymentReconciliationEntity outsideRow = DeploymentReconciliationEntity.find("deploymentId", outside.id()).firstResult();
+        outsideRow.updatedAt = now.minusSeconds(1200);
+        outsideRow.persist();
+        assertEquals(1, reconciliation.evaluateSlaTransitions(now.plusSeconds(40)));
+
+        var history = reconciliation.slaHistory(org, Set.of(env), 0, 10);
+        assertEquals(3L, history.total());
+        assertEquals(3, history.items().size());
+        assertEquals("HEALTHY", history.items().get(0).toStatus());
+        assertEquals("CRITICAL", history.items().get(1).toStatus());
+        assertEquals("WARNING", history.items().get(2).toStatus());
+        assertTrue(history.items().stream().allMatch(item -> deployment.id().equals(item.deploymentId())));
+        assertEquals(0L, reconciliation.slaHistory(org, Set.of(), 0, 10).total());
+    }
+
+    @Test
+    void reconciliationSlaPolicyRejectsInvalidThresholds() {
+        assertDoesNotThrow(() -> DeploymentReconciliationService.validateSlaThresholds(300, 900));
+        assertDoesNotThrow(() -> DeploymentReconciliationService.validateSlaThresholds(60, 3600));
+        assertThrows(IllegalStateException.class, () -> DeploymentReconciliationService.validateSlaThresholds(0, 900));
+        assertThrows(IllegalStateException.class, () -> DeploymentReconciliationService.validateSlaThresholds(900, 300));
+        assertThrows(IllegalStateException.class, () -> DeploymentReconciliationService.validateSlaThresholds(300, 2_592_001));
+    }
+
+    @Test
+    @TestTransaction
     void exhaustedReconciliationRetriesRequireManualIntervention() {
         UUID org = UUID.randomUUID(), env = UUID.randomUUID();
         var enrollment = registry.issueEnrollmentToken(org, env, Duration.ofHours(1));
@@ -338,6 +614,120 @@ class DeploymentReconciliationIntegrationTest {
         assertEquals("MANUAL_INTERVENTION", row.reconciliationState);
         assertNull(row.nextAttemptAt);
         assertTrue(row.diagnostic.contains("5 automatic retries"));
+    }
+
+
+    @Test
+    @TestTransaction
+    void webhookDeliveryHistoryIsScopedAndRetryPreservesAuditIdentity() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID(), otherEnv = UUID.randomUUID();
+        var event = new ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity();
+        event.id = UUID.randomUUID();
+        event.organizationId = org;
+        event.environmentId = env;
+        event.auditSequence = 41L;
+        event.recordHash = "a".repeat(64);
+        event.deploymentId = UUID.randomUUID();
+        event.fromStatus = "WARNING";
+        event.toStatus = "CRITICAL";
+        event.occurredAt = Instant.now().minusSeconds(60);
+        event.status = "FAILED";
+        event.attemptCount = 10;
+        event.createdAt = Instant.now().minusSeconds(30);
+        event.lastAttemptAt = Instant.now().minusSeconds(10);
+        event.lastFailureCode = "HTTP_503";
+        event.persist();
+
+        var hidden = new ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity();
+        hidden.id = UUID.randomUUID();
+        hidden.organizationId = org;
+        hidden.environmentId = otherEnv;
+        hidden.auditSequence = 42L;
+        hidden.recordHash = "b".repeat(64);
+        hidden.deploymentId = UUID.randomUUID();
+        hidden.fromStatus = "WARNING";
+        hidden.toStatus = "CRITICAL";
+        hidden.occurredAt = Instant.now();
+        hidden.status = "FAILED";
+        hidden.attemptCount = 10;
+        hidden.createdAt = Instant.now();
+        hidden.persist();
+
+        var page = webhookSink.deliveryHistory(org, Set.of(env), 0, 25);
+        assertEquals(1L, page.total());
+        assertEquals(event.id, page.items().get(0).id());
+
+        var retried = webhookSink.retryFailed(org, Set.of(env), event.id,
+                "test-operator", "Operator verified endpoint recovery");
+        assertEquals("PENDING", retried.status());
+        assertEquals(0, retried.attemptCount());
+        assertNull(retried.failureCode());
+        assertNotNull(retried.nextAttemptAt());
+        assertEquals(41L, retried.auditSequence());
+
+        var persisted = ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity
+                .<ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity>findById(event.id);
+        assertEquals("a".repeat(64), persisted.recordHash);
+        assertEquals(1L, ai.wayang.console.adapter.persistence.AuditRecordEntity.count(
+                "organizationId = ?1 and environmentId = ?2 and action = ?3 and resourceId = ?4",
+                org, env, "RECONCILIATION_WEBHOOK_RETRY_REQUESTED", event.id.toString()));
+
+        assertThrows(jakarta.ws.rs.NotFoundException.class,
+                () -> webhookSink.retryFailed(org, Set.of(otherEnv), event.id,
+                        "test-operator", "Must not cross environment scope"));
+        var conflict = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                () -> webhookSink.retryFailed(org, Set.of(env), event.id,
+                        "test-operator", "A second retry requires another terminal failure"));
+        assertEquals(409, conflict.getResponse().getStatus());
+    }
+
+
+    @Test
+    @TestTransaction
+    void webhookRetentionRemovesOnlyOldTerminalRowsInBoundedBatches() {
+        UUID org = UUID.randomUUID(), env = UUID.randomUUID();
+        Instant old = Instant.now().minusSeconds(120L * 86400L);
+        var delivered = webhookDelivery(org, env, "DELIVERED", old);
+        var failed = webhookDelivery(org, env, "FAILED", old);
+        var pending = webhookDelivery(org, env, "PENDING", old);
+        var delivering = webhookDelivery(org, env, "DELIVERING", old);
+        var metrics = webhookSink.operationalMetrics(org, Set.of(env), Instant.now());
+        assertEquals(4L, metrics.accepted());
+        assertEquals(2L, metrics.pending());
+        assertEquals(1L, metrics.delivered());
+        assertEquals(1L, metrics.failed());
+        assertTrue(metrics.oldestPendingAgeSeconds() >= 120L * 86400L - 5L);
+        int removed = webhookSink.purgeTerminalBefore(Instant.now().minusSeconds(90L * 86400L), 1);
+        assertEquals(1, removed);
+        long remainingTerminal = ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity.count(
+                "id = ?1", delivered.id) + ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity.count(
+                "id = ?1", failed.id);
+        assertEquals(1L, remainingTerminal);
+        assertEquals(1L, ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity.count("id = ?1", pending.id));
+        assertEquals(1L, ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity.count("id = ?1", delivering.id));
+        assertEquals(1, webhookSink.purgeTerminalBefore(Instant.now().minusSeconds(90L * 86400L), 10));
+    }
+
+    private static ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity webhookDelivery(
+            UUID org, UUID env, String status, Instant createdAt) {
+        var event = new ai.wayang.console.adapter.persistence.ReconciliationWebhookDeliveryEntity();
+        event.id = UUID.randomUUID();
+        event.organizationId = org;
+        event.environmentId = env;
+        event.auditSequence = Math.abs(UUID.randomUUID().getLeastSignificantBits()) + 1L;
+        event.recordHash = java.util.UUID.randomUUID().toString().replace("-", "").repeat(2);
+        event.deploymentId = UUID.randomUUID();
+        event.fromStatus = "WARNING";
+        event.toStatus = "CRITICAL";
+        event.occurredAt = createdAt;
+        event.status = status;
+        event.attemptCount = status.equals("FAILED") ? 10 : 1;
+        event.createdAt = createdAt;
+        event.deliveredAt = status.equals("DELIVERED") ? createdAt : null;
+        event.lastAttemptAt = status.equals("FAILED") ? createdAt : null;
+        event.leaseUntil = status.equals("DELIVERING") ? Instant.now().plusSeconds(60) : null;
+        event.persist();
+        return event;
     }
 
 }

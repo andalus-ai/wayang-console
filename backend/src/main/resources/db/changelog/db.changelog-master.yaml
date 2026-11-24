@@ -577,3 +577,95 @@ databaseChangeLog:
         - dropColumn: { tableName: wc_management_command, columnName: superseded_at }
         - dropColumn: { tableName: wc_management_command, columnName: superseded_by_generation }
         - dropColumn: { tableName: wc_management_command, columnName: generation }
+
+  - changeSet:
+      id: 017-reconciliation-sla-transition-state
+      author: andalus-ai
+      changes:
+        - addColumn:
+            tableName: wc_deployment_reconciliation
+            columns:
+              - column: { name: sla_status, type: VARCHAR(16) }
+              - column: { name: sla_evaluated_at, type: TIMESTAMP WITH TIME ZONE }
+        - createIndex:
+            tableName: wc_deployment_reconciliation
+            indexName: idx_wc_reconciliation_sla_status
+            columns:
+              - column: { name: sla_status }
+              - column: { name: updated_at }
+      rollback:
+        - dropIndex:
+            tableName: wc_deployment_reconciliation
+            indexName: idx_wc_reconciliation_sla_status
+        - dropColumn: { tableName: wc_deployment_reconciliation, columnName: sla_evaluated_at }
+        - dropColumn: { tableName: wc_deployment_reconciliation, columnName: sla_status }
+
+
+  - changeSet:
+      id: 018-durable-reconciliation-webhook-delivery
+      author: andalus-ai
+      changes:
+        - createTable:
+            tableName: wc_reconciliation_webhook_cursor
+            columns:
+              - column: { name: id, type: UUID, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: organization_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: environment_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: last_accepted_sequence, type: BIGINT, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: updated_at, type: TIMESTAMP WITH TIME ZONE, constraints: { nullable: false } }
+        - addUniqueConstraint:
+            tableName: wc_reconciliation_webhook_cursor
+            columnNames: organization_id, environment_id
+            constraintName: uk_wc_recon_webhook_cursor_scope
+        - createTable:
+            tableName: wc_reconciliation_webhook_delivery
+            columns:
+              - column: { name: id, type: UUID, constraints: { primaryKey: true, nullable: false } }
+              - column: { name: organization_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: environment_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: audit_sequence, type: BIGINT, constraints: { nullable: false } }
+              - column: { name: record_hash, type: VARCHAR(64), constraints: { nullable: false } }
+              - column: { name: deployment_id, type: UUID, constraints: { nullable: false } }
+              - column: { name: from_status, type: VARCHAR(16), constraints: { nullable: false } }
+              - column: { name: to_status, type: VARCHAR(16), constraints: { nullable: false } }
+              - column: { name: occurred_at, type: TIMESTAMP WITH TIME ZONE, constraints: { nullable: false } }
+              - column: { name: delivery_status, type: VARCHAR(16), constraints: { nullable: false } }
+              - column: { name: attempt_count, type: INT, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: created_at, type: TIMESTAMP WITH TIME ZONE, constraints: { nullable: false } }
+              - column: { name: next_attempt_at, type: TIMESTAMP WITH TIME ZONE }
+              - column: { name: last_attempt_at, type: TIMESTAMP WITH TIME ZONE }
+              - column: { name: lease_until, type: TIMESTAMP WITH TIME ZONE }
+              - column: { name: delivered_at, type: TIMESTAMP WITH TIME ZONE }
+              - column: { name: last_failure_code, type: VARCHAR(80) }
+        - addUniqueConstraint:
+            tableName: wc_reconciliation_webhook_delivery
+            columnNames: organization_id, environment_id, audit_sequence
+            constraintName: uk_wc_recon_webhook_event
+        - createIndex:
+            tableName: wc_reconciliation_webhook_delivery
+            indexName: idx_wc_recon_webhook_due
+            columns:
+              - column: { name: delivery_status }
+              - column: { name: next_attempt_at }
+              - column: { name: lease_until }
+        - createIndex:
+            tableName: wc_reconciliation_webhook_delivery
+            indexName: idx_wc_recon_webhook_scope_status
+            columns:
+              - column: { name: organization_id }
+              - column: { name: environment_id }
+              - column: { name: delivery_status }
+      rollback:
+        - dropTable: { tableName: wc_reconciliation_webhook_delivery }
+        - dropTable: { tableName: wc_reconciliation_webhook_cursor }
+
+  - changeSet:
+      id: 019-webhook-secret-version
+      author: andalus-ai
+      changes:
+        - addColumn:
+            tableName: wc_reconciliation_webhook_delivery
+            columns:
+              - column: { name: last_secret_version, type: VARCHAR(64) }
+      rollback:
+        - dropColumn: { tableName: wc_reconciliation_webhook_delivery, columnName: last_secret_version }

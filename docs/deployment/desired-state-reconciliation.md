@@ -173,3 +173,172 @@ The observation read model exposes a derived observationFresh flag based on the 
 The worker processes a bounded batch and locks each deployment before its reconciliation row. It changes state only after rechecking the desired state, current reconciliation state, and receipt timestamp under lock. Repeated worker runs therefore do not emit duplicate expiry events or repeatedly reset the retry schedule. The existing timeout/backoff worker subsequently handles WAITING_RUNTIME; no second command queue or outbox is introduced.
 
 This milestone is observational and non-destructive. It does not stop workloads for ABSENT, auto-apply rollback, or infer that an unreachable runtime has terminated. Existing generation fencing, command supersession, bounded retries, and operator escalation remain authoritative.
+
+
+## M1.10.8 — fleet reconciliation summary
+
+The operator-facing fleet summary is available at:
+
+`GET /api/v1/console/deployments/reconciliation/summary`
+
+It aggregates reconciliation states, due retries, unresolved command supersessions, and the oldest unresolved deployment for the authenticated organization/environment scope. It is read-only and does not dispatch commands or mutate deployment state. The existing paginated queue remains the drill-down surface.
+
+## M1.10.9 — age-based reconciliation health
+
+The Console exposes an age-based operational health view at:
+
+`GET /api/v1/console/deployments/reconciliation/health`
+
+The endpoint classifies unresolved reconciliation records by time since their last state update: fresh (under five minutes), warning (five to under fifteen minutes), and critical (fifteen minutes or more). The response includes the explicit thresholds, counts for each band, an overall HEALTHY/WARNING/CRITICAL status, and the oldest unresolved deployment. Counts and details are restricted to the authenticated operator's organization/environment scope; empty scope returns a healthy zero-count response.
+
+This is a derived, read-only signal. It does not mutate reconciliation state, create another queue, dispatch retries, or claim that a runtime process has stopped. Age is based on the Console's persisted `updatedAt`, not a runtime-provided timestamp. Thresholds are fixed defaults in this milestone and can be made configurable through deployment policy in a later change.
+
+
+## M1.10.10 — configurable reconciliation SLA policy
+
+The age-band thresholds used by `GET /api/v1/console/deployments/reconciliation/health` are configuration-backed:
+
+- `wayang.console.reconciliation.sla.warning-seconds` (default `300`)
+- `wayang.console.reconciliation.sla.critical-seconds` (default `900`)
+
+They can be set through `WAYANG_CONSOLE_RECONCILIATION_SLA_WARNING_SECONDS` and `WAYANG_CONSOLE_RECONCILIATION_SLA_CRITICAL_SECONDS`. Startup validation requires a positive warning threshold, a critical threshold strictly greater than warning, and a critical threshold no greater than 30 days. Invalid configuration fails startup rather than silently producing misleading classifications.
+
+The health response reports the effective thresholds and `policyVersion=config-v1`. This is deployment-level configuration, not tenant-controlled input, so individual operators cannot weaken shared operational alerting. The endpoint remains read-only and organization/environment scoped.
+
+
+## M1.10.11 — durable reconciliation SLA transitions
+
+The scheduled reconciliation worker evaluates SLA transitions after observation expiry and retry scheduling. Each reconciliation row stores its last evaluated SLA status (HEALTHY, WARNING, or CRITICAL) and evaluation time. A transition is persisted only when the status changes; repeated worker evaluations do not emit duplicate audit records.
+
+The transition is appended to the existing per-organization/environment tamper-evident audit chain as a RECONCILIATION_SLA_<FROM>_TO_<TO> action. The first evaluation uses UNINITIALIZED as the source status. Returning to HEALTHY is recorded when an unresolved deployment falls below the warning threshold or when reconciliation reaches IN_SYNC.
+
+Operators can inspect the newest transitions through:
+
+GET /api/v1/console/deployments/reconciliation/sla/history?page=0&size=25
+
+The endpoint derives organization/environment scope from the authenticated operator, is read-only, and returns paginated transitions from the existing audit chain. No new event queue or independent history store is introduced. Evaluation is bounded to 100 candidates per worker pass and rechecks each candidate while holding locks in deployment -> reconciliation order.
+
+
+## M1.10.12 — scoped SLA metrics and Prometheus exposition
+
+The Console exposes aggregate SLA metrics for the authenticated operator's organization and permitted environments:
+
+- JSON: `GET /api/v1/console/deployments/reconciliation/sla/metrics`
+- Prometheus text format: `GET /api/v1/console/deployments/reconciliation/sla/metrics/prometheus`
+
+The exposition includes unresolved, fresh, warning, and critical gauges; configured warning and critical thresholds; and append-only transition counters by destination state. The endpoint is protected by the same authenticated operator access check as the reconciliation health and history endpoints. A Prometheus scraper must use a dedicated read-authorized operator identity and bearer token.
+
+Metrics are aggregated across the caller's permitted environments. No organization, environment, deployment, runtime, workflow, or user identifiers are emitted as labels; only the fixed destination-state and policy-version labels are used. This avoids tenant disclosure and unbounded label cardinality. Empty environment scope returns zero-valued metrics. The endpoint is read-only and does not trigger SLA evaluation, append audit records, dispatch commands, or mutate reconciliation state.
+
+The transition counters are derived from the existing append-only audit chain, not from a second metrics event store. Current-state gauges use the same Console timestamps and configurable SLA thresholds as the reconciliation health endpoint.
+
+
+## M1.10.13 — SLA alert policy and notification SPI
+
+SLA transitions can publish opt-in alert signals after the transaction commits. The policy is configured independently for warning, critical, and recovery transitions:
+
+- `wayang.console.reconciliation.sla.alerts.warning.enabled`
+- `wayang.console.reconciliation.sla.alerts.critical.enabled`
+- `wayang.console.reconciliation.sla.alerts.recovery.enabled`
+
+All default to `false`; equivalent environment variables are documented in `application.properties`. The authenticated operator can inspect the effective policy at:
+
+`GET /api/v1/console/deployments/reconciliation/sla/alert-policy`
+
+Extensions provide `ReconciliationSlaAlertSink` CDI beans. The core has no dependency on email, Slack, or webhook vendors. Alert intents are written only for actual persisted SLA transitions whose corresponding alert category is enabled. Delivery is delegated to provider extensions; the audit-backed replay and provider acceptance contract is defined in M1.10.14. No notification destination or secret is accepted from operator request payloads.
+
+
+## M1.10.14 — durable SLA alert delivery contract
+
+Enabled WARNING, CRITICAL, and recovery transitions now append a separate `RECONCILIATION_ALERT_<FROM>_TO_<TO>` intent record to the same per-organization/environment tamper-evident audit chain and in the same transaction as the SLA state transition. Disabled alert categories do not create delivery intents. This is an audit-backed replay source, not a second outbox or queue.
+
+The existing scheduled reconciliation worker replays committed alert intents in sequence order. Each `ReconciliationSlaAlertSink` implementation must:
+
+- expose a stable `sinkId()`;
+- persist and return its per-organization/environment `lastAcceptedSequence`;
+- make `accept(transition, expectedLastAcceptedSequence)` idempotent on organization, environment, audit sequence, and record hash;
+- atomically compare-and-set its cursor, persist the accepted event, and advance the cursor; concurrent Console workers must not be able to skip or reorder events;
+- own its durable provider delivery lifecycle, retry/backoff, cooldown, and terminal failure state;
+- expose aggregate delivery status for the requested organization/environment scope.
+
+The core invokes providers outside a database transaction. A failed acceptance does not advance the provider cursor, so the next worker pass retries the same audit record. Provider acceptance is deliberately separate from final delivery: the provider's own durable store must track pending, delivered, and failed outcomes. The core does not claim that an accepted event has reached an external destination.
+
+Operators can inspect provider status at:
+
+`GET /api/v1/console/deployments/reconciliation/sla/delivery`
+
+The endpoint requires read authorization and passes only the authenticated organization/environment scope to each provider. It returns aggregate counts and bounded failure metadata, never destinations, credentials, or secret material. A provider status exception is represented as `UNAVAILABLE` and does not affect reconciliation.
+
+No new database table, command queue, or generic outbox is introduced. Runtime execution and reconciliation do not wait for external notification delivery.
+
+
+## M1.10.15 — secure webhook extension boundary
+
+The webhook extension primitives provide a vendor-neutral request contract without placing destinations or credentials in operator API payloads:
+
+- `ReconciliationSlaWebhookSecretResolver` resolves an opaque secret reference through an external secret manager. Implementations must return a caller-owned character array and never log secret values.
+- `ReconciliationSlaWebhookTransport` is the only network boundary. A production implementation must enforce TLS hostname/certificate verification, disable redirects, apply destination-IP egress checks after DNS resolution (including loopback, private, link-local, and DNS-rebinding defenses), bound response consumption, and honor the request timeout. A plain unrestricted HTTP client is not compliant.
+- `ReconciliationSlaWebhookSupport` accepts HTTPS only, rejects user-info, query strings, fragments, non-standard ports, IP literals, and local hostnames, and requires an exact DNS-host allowlist match.
+- `ReconciliationSlaWebhookClient` serializes the persisted audit transition, signs the exact request bytes using HMAC-SHA256 over `timestamp + "." + body`, and supplies a stable `Idempotency-Key` derived from organization, environment, audit sequence, and record hash. The signing header is `X-Wayang-Webhook-Signature: v1=<hex>`; timestamp is supplied separately in `X-Wayang-Webhook-Timestamp`.
+- HTTP response classification is exposed as 2xx success and retryable 408/425/429/5xx. The durable sink/provider still owns scheduling, retry/backoff, cooldown, and terminal failure state.
+
+Configuration:
+
+- `wayang.console.reconciliation.sla.webhook.allowed-hosts` / `WAYANG_CONSOLE_SLA_WEBHOOK_ALLOWED_HOSTS`: exact comma-separated DNS host allowlist; empty by default.
+- `wayang.console.reconciliation.sla.webhook.timeout-seconds` / `WAYANG_CONSOLE_SLA_WEBHOOK_TIMEOUT_SECONDS`: request timeout, 1–30 seconds; defaults to 5.
+
+**M1.10.15 boundary (superseded by M1.10.16):** this milestone intentionally introduced only the extension SPIs and did not ship a default unrestricted HTTP client or plaintext secret storage. The concrete secret resolver, restricted HTTPS transport, and provider-owned durable lifecycle are implemented in M1.10.16 below.
+
+
+## M1.10.16 — durable HTTPS webhook provider
+
+The built-in `wayang-https-webhook` sink now implements the M1.10.14 durable acceptance contract. The audit chain remains the replay source; the provider owns its separate delivery lifecycle in `wc_reconciliation_webhook_cursor` and `wc_reconciliation_webhook_delivery`.
+
+- Acceptance stores the audit-backed transition and advances the organization/environment cursor in one transaction. A unique scope/sequence constraint and pessimistic cursor lock protect concurrent workers; duplicate acceptance of the same audit hash is idempotent.
+- Delivery claims use a short database lease. Network I/O occurs after the claim transaction commits, and completion is guarded by the claim attempt and lease so stale workers cannot overwrite a newer attempt.
+- The provider retries transport failures and HTTP 408/425/429/5xx with exponential backoff (30 seconds up to one hour), up to 10 attempts. Other HTTP statuses become terminal failures. A worker crash leaves a lease that can be reclaimed after expiry.
+- Delivery status aggregates accepted, pending, delivered, and failed counts within the authenticated organization/environment scope. Failure codes are bounded identifiers; endpoint URLs and secret references are not returned.
+- `MicroProfileConfigWebhookSecretResolver` resolves either an opaque MicroProfile Config property name or an `env:VARIABLE_NAME` reference. Production should source these values from an external ConfigSource or orchestrator-injected secret, not source control.
+- `RestrictedHttpsWebhookTransport` resolves DNS once per attempt, rejects loopback/private/link-local/reserved destinations, connects to the selected resolved address (avoiding a second DNS lookup), preserves TLS SNI and hostname verification, disables redirects, enforces request timeouts, and bounds response headers. It supports HTTPS on port 443 only.
+
+### Per-tenant destination configuration
+
+Each organization/environment pair has its own destination:
+
+- `wayang.console.reconciliation.sla.webhook.destinations.<organization-uuid>.<environment-uuid>.endpoint`
+- `wayang.console.reconciliation.sla.webhook.destinations.<organization-uuid>.<environment-uuid>.secret-reference`
+
+The endpoint host must also appear exactly in `wayang.console.reconciliation.sla.webhook.allowed-hosts`. The secret reference may be `env:WAYANG_SECRET_<NAME>` or the name of a property supplied by a trusted external MicroProfile ConfigSource. The resolved secret must contain at least 32 characters. The timeout remains configurable from 1 to 30 seconds.
+
+Do not place secret values in `application.properties`, source control, operator API requests, destination URLs, or logs. Inject them from an orchestrator secret or a dedicated secret-manager ConfigSource and rotate them using that system's controls. Destination configuration is organization/environment scoped; no destination is shared implicitly between tenants.
+
+The provider delivery tables are extension-owned persistence, not a second Console outbox: they exist only to satisfy this sink's durable acceptance, retry, lease, and status contract. Runtime execution and reconciliation remain independent of webhook delivery.
+
+
+## M1.10.17 — webhook operator recovery and delivery history
+
+The built-in HTTPS SLA webhook provider now exposes a paginated, authenticated operator view of delivery records:
+
+`GET /api/v1/console/deployments/reconciliation/sla/webhook/deliveries?page=0&size=25`
+
+The response is scoped to the authenticated operator's organization and visible environments. It includes the original audit sequence, deployment, transition, delivery state, attempt count, timestamps, and bounded failure code. It does not expose destination URLs, secret references, secret material, or raw transport exception messages. Page size is capped at 100.
+
+A terminally failed event can be retried by an administrator:
+
+`POST /api/v1/console/deployments/reconciliation/sla/webhook/deliveries/{deliveryId}/retry`
+
+The request requires a reason (1–500 characters). The Console locks and scopes the delivery row, accepts only `FAILED`, and appends `RECONCILIATION_WEBHOOK_RETRY_REQUESTED` to the existing tamper-evident audit chain in the same transaction. It returns the same event to `PENDING`, clears the prior lease/failure state, and resets the attempt counter so the existing worker can retry immediately. The original audit sequence, record hash, delivery ID, and provider acceptance cursor are unchanged; the operation does not manufacture a new alert event or bypass the existing worker/transport policy. Non-terminal events return HTTP 409, and out-of-scope or unknown event IDs return HTTP 404.
+
+
+## M1.10.18 — webhook operations and lifecycle management
+
+Operational visibility is available to authenticated operators at:
+
+- `GET /api/v1/console/deployments/reconciliation/sla/webhook/metrics`
+- The existing `GET /api/v1/console/deployments/reconciliation/sla/metrics/prometheus` exposition now includes webhook accepted, pending, delivered, failed, oldest-pending-age, and average delivery-latency gauges.
+
+Metrics are calculated only over the operator's organization and visible environments. Prometheus output contains no organization, environment, deployment, runtime, or user labels. Average delivery latency is computed from retained successful delivery rows.
+
+Webhook destinations may define an opaque `secret-version` alongside `secret-reference`. The version is sent as `X-Wayang-Webhook-Key-Version` and recorded as the last version used for each delivery. It is an identifier only, never key material. Rotate a key by publishing the new secret under a new reference, changing the configured reference and version together, and arranging receiver-side overlap for old/new versions while in-flight requests finish. Pending retries resolve the current destination at attempt time, so they use the newly configured key.
+
+Terminal delivery history is retained for 90 days by default. A daily bounded cleanup removes only old `DELIVERED` and `FAILED` provider rows (maximum 500 per run by default). `PENDING` and `DELIVERING` records are never eligible. The provider cursor and tamper-evident audit chain are not deleted; retention applies only to operational delivery detail. Retention is configurable with `WAYANG_CONSOLE_SLA_WEBHOOK_RETENTION_DAYS` (7–3650) and `WAYANG_CONSOLE_SLA_WEBHOOK_RETENTION_BATCH_SIZE` (1–1000).
